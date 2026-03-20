@@ -184,7 +184,7 @@ def run_init(
         written_files.append(prompt_path)
     written_files.extend(wrote_harness_extras)
 
-    click.echo("Autoevolve initialized.")
+    click.echo("autoevolve initialized.")
     print_post_init_summary(
         repo_root,
         written_files,

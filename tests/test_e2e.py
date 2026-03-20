@@ -243,7 +243,7 @@ Repository
 Review
 Harness: other
 Files: PROBLEM.md, PROGRAM.md
-Autoevolve initialized.
+autoevolve initialized.
 
 Repository: <PATH_1>
 
@@ -323,7 +323,7 @@ Repository
 Review
 Harness: other
 Files: PROBLEM.md, PROGRAM.md
-Autoevolve initialized.
+autoevolve initialized.
 
 Repository: <PATH_1>
 
@@ -368,7 +368,7 @@ Review
 Harness: other
 Problem: Keep existing PROBLEM.md
 Files: keep PROBLEM.md, write PROGRAM.md
-Autoevolve initialized.
+autoevolve initialized.
 
 Repository: <PATH_1>
 
@@ -1369,7 +1369,7 @@ def test_harness_init_variants(harness: str, skill_path: str, handoff_prompt: st
     result = run(["init", harness, "--yes"], cwd=repo_path)
     skill_text = Path(repo_path, skill_path).read_text(encoding="utf-8")
     assert skill_text.startswith("---\nname: autoevolve\ndescription: ")
-    assert "\n# Autoevolve Protocol\n" in skill_text
+    assert "\n# autoevolve protocol\n" in skill_text
     assert f"For example:\n  {handoff_prompt}\n" in result.stdout
 
 

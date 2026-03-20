@@ -24,7 +24,7 @@ def build_protocol_body() -> str:
     managed_worktree_root = format_home_relative_path(MANAGED_WORKTREE_ROOT)
     return "\n".join(
         [
-            "# Autoevolve Protocol",
+            "# autoevolve protocol",
             "",
             "## Setup",
             "",
@@ -186,7 +186,7 @@ def build_protocol_body() -> str:
                 "commands."
             ),
             "",
-            "## How Autoevolve Works",
+            "## How autoevolve works",
             "",
             "### Problem Definition",
             "",
