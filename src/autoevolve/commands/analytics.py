@@ -137,20 +137,17 @@ def dominates(
     return strictly_better
 
 
-def sanitize_tsv_field(value: str) -> str:
-    return value.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
-
-
 def format_experiment_tsv_row(record: ExperimentRecord) -> str:
+    def clean(value: str) -> str:
+        return value.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+
     fields = [
         short_sha(record.sha),
         record.date,
-        sanitize_tsv_field(record.subject),
-        sanitize_tsv_field(",".join(record.tip_branches)),
-        sanitize_tsv_field(
-            format_metric_pairs(record.parsed.metrics if record.parsed else None) or ""
-        ),
-        sanitize_tsv_field(record.parsed.summary if record.parsed else record.parse_error or ""),
+        clean(record.subject),
+        clean(",".join(record.tip_branches)),
+        clean(format_metric_pairs(record.parsed.metrics if record.parsed else None) or ""),
+        clean(record.parsed.summary if record.parsed else record.parse_error or ""),
     ]
     return "\t".join(fields)
 

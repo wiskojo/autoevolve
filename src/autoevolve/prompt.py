@@ -20,14 +20,6 @@ def _with_todo_fallback(value: str, fallback: str) -> str:
     return value.strip() if value.strip() else fallback
 
 
-def build_setup_handoff_prompt() -> str:
-    return "Follow the setup instructions for autoevolve."
-
-
-def build_loop_handoff_prompt() -> str:
-    return "Start autoevolve."
-
-
 def build_protocol_body() -> str:
     managed_worktree_root = format_home_relative_path(MANAGED_WORKTREE_ROOT)
     return "\n".join(

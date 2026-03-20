@@ -791,16 +791,17 @@ def build_status_output(repo_root: str, records: list[ExperimentRecord]) -> dict
     }
 
 
-def _primary_metric_object(payload: dict[str, Any] | None) -> PrimaryMetricSpec | None:
-    if payload is None:
-        return None
-    return PrimaryMetricSpec(
-        direction=payload["direction"], metric=payload["metric"], raw=payload["raw"]
-    )
-
-
 def print_status_output(status: dict[str, Any]) -> None:
-    primary_metric = _primary_metric_object(status["primaryMetric"])
+    primary_metric_payload = status["primaryMetric"]
+    primary_metric = (
+        None
+        if primary_metric_payload is None
+        else PrimaryMetricSpec(
+            direction=primary_metric_payload["direction"],
+            metric=primary_metric_payload["metric"],
+            raw=primary_metric_payload["raw"],
+        )
+    )
     managed_worktrees = [
         worktree
         for worktree in status["worktrees"]
@@ -854,31 +855,24 @@ def print_status_output(status: dict[str, Any]) -> None:
         click.echo("")
 
 
-def format_list_metrics(record: ExperimentRecord) -> str:
-    if record.parse_error:
-        return f"invalid EXPERIMENT.json: {record.parse_error}"
-    return format_metric_pairs(record.parsed.metrics if record.parsed else None) or "(none)"
-
-
-def format_list_summary(record: ExperimentRecord) -> str:
-    if record.parse_error:
-        return f"invalid EXPERIMENT.json: {record.parse_error}"
-    return record.parsed.summary if record.parsed else "(none)"
-
-
-def format_list_journal_excerpt(record: ExperimentRecord) -> str:
-    return extract_excerpt(record.journal_text) or "(none)"
-
-
 def print_list_record(record: ExperimentRecord) -> None:
+    summary = (
+        f"invalid EXPERIMENT.json: {record.parse_error}"
+        if record.parse_error
+        else record.parsed.summary
+        if record.parsed
+        else "(none)"
+    )
+    metrics = (
+        f"invalid EXPERIMENT.json: {record.parse_error}"
+        if record.parse_error
+        else format_metric_pairs(record.parsed.metrics if record.parsed else None) or "(none)"
+    )
+    journal_excerpt = extract_excerpt(record.journal_text) or "(none)"
     click.echo(f"{short_sha(record.sha)}  {record.date}  {record.subject}")
-    click.echo(f"  summary: {format_list_summary(record)}")
-    click.echo(f"  metrics: {format_list_metrics(record)}")
-    click.echo(f"  journal: {format_list_journal_excerpt(record)}")
-
-
-def should_include_graph_edge(kind: str, mode: str) -> bool:
-    return mode == "all" or mode == kind
+    click.echo(f"  summary: {summary}")
+    click.echo(f"  metrics: {metrics}")
+    click.echo(f"  journal: {journal_excerpt}")
 
 
 def collect_graph(
@@ -893,6 +887,8 @@ def collect_graph(
     git_parent_map = build_git_parent_map(repo_root, records)
     git_child_map = build_git_child_map(git_parent_map)
     incoming_reference_map = build_incoming_reference_map(records)
+    include_git_edges = edge_mode in {"all", "git"}
+    include_reference_edges = edge_mode in {"all", "references"}
     queue = deque([(0, starting_sha)])
     node_order: list[str] = []
     seen_depth: dict[str, int] = {}
@@ -923,26 +919,17 @@ def collect_graph(
             edge_keys.add(edge_key)
             edge_list.append(edge)
 
-        if should_include_graph_edge("git", edge_mode) and traversal_direction in {
-            "backward",
-            "both",
-        }:
+        if include_git_edges and traversal_direction in {"backward", "both"}:
             for parent_sha in git_parent_map.get(sha, []):
                 add_edge({"from": sha, "kind": "git", "to": parent_sha})
                 enqueue(parent_sha, current_depth + 1)
 
-        if should_include_graph_edge("git", edge_mode) and traversal_direction in {
-            "forward",
-            "both",
-        }:
+        if include_git_edges and traversal_direction in {"forward", "both"}:
             for child_sha in git_child_map.get(sha, []):
                 add_edge({"from": child_sha, "kind": "git", "to": sha})
                 enqueue(child_sha, current_depth + 1)
 
-        if should_include_graph_edge("reference", edge_mode) and traversal_direction in {
-            "backward",
-            "both",
-        }:
+        if include_reference_edges and traversal_direction in {"backward", "both"}:
             record = record_map.get(sha)
             for reference in (record.parsed.references or []) if record and record.parsed else []:
                 add_edge(
@@ -955,10 +942,7 @@ def collect_graph(
                 )
                 enqueue(reference.commit, current_depth + 1)
 
-        if should_include_graph_edge("reference", edge_mode) and traversal_direction in {
-            "forward",
-            "both",
-        }:
+        if include_reference_edges and traversal_direction in {"forward", "both"}:
             for incoming in incoming_reference_map.get(sha, []):
                 add_edge(
                     {

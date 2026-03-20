@@ -813,6 +813,29 @@ edges:
         edge["kind"] == "reference" and edge["to"] == commit_by_branch["island-c/premium-guard"]
         for edge in graph_record["edges"]
     )
+    references_only_graph = run(
+        [
+            "graph",
+            "cross/hybrid-final",
+            "--edges",
+            "references",
+            "--direction",
+            "backward",
+            "--depth",
+            "all",
+            "--format",
+            "json",
+        ],
+        cwd=repo_path,
+    )
+    references_only_record = json.loads(references_only_graph.stdout)
+    assert references_only_record["mode"] == "references"
+    assert references_only_record["edges"]
+    assert all(edge["kind"] == "reference" for edge in references_only_record["edges"])
+    assert any(
+        edge["to"] == commit_by_branch["island-c/premium-guard"]
+        for edge in references_only_record["edges"]
+    )
 
     default_graph = run(["graph", "cross/hybrid-final"], cwd=repo_path)
     assert normalize_text(default_graph.stdout) == snapshot("""\

@@ -22,9 +22,7 @@ from autoevolve.problem import (
 from autoevolve.prompt import (
     ProblemTemplateOptions,
     build_harness_prompt,
-    build_loop_handoff_prompt,
     build_problem_template,
-    build_setup_handoff_prompt,
 )
 from autoevolve.utils import (
     file_exists,
@@ -35,27 +33,6 @@ from autoevolve.utils import (
     resolve_repo_path,
     write_text_file,
 )
-
-
-def has_explicit_problem_inputs(
-    mode: str | None,
-    goal: str | None,
-    metric: str | None,
-    metric_description: str | None,
-    constraints: str | None,
-    validation: str | None,
-) -> bool:
-    return any(
-        value is not None
-        for value in [
-            mode,
-            goal,
-            metric,
-            metric_description,
-            constraints,
-            validation,
-        ]
-    )
 
 
 def require_filled_value(value: str, field_name: str) -> str:
@@ -114,10 +91,6 @@ def choose_setup_mode(initial_value: str) -> str:
     return str(choice)
 
 
-def choose_keep_existing_problem() -> bool:
-    return bool(click.confirm(f"Keep the existing {ROOT_FILES.problem}?", default=True))
-
-
 def choose_continue_hook(harness: Harness) -> bool:
     click.echo("Continue Forever Hook")
     click.echo(f"Install a {harness.value} stop hook that prevents early termination.")
@@ -126,83 +99,6 @@ def choose_continue_hook(harness: Harness) -> bool:
         "done or a human interrupts it."
     )
     return bool(click.confirm("Install the continue-forever hook?", default=False))
-
-
-def ask_goal(initial_value: str) -> str:
-    result = str(
-        click.prompt(
-            "Goal",
-            default=initial_value,
-            show_default=bool(initial_value),
-        )
-    )
-    if not result.strip():
-        raise AutoevolveError("Goal is required for `Set up now`. Otherwise choose scaffold mode.")
-    return result.strip()
-
-
-def ask_metric_spec(initial_value: str) -> str:
-    click.echo("Metric Format")
-    click.echo(build_primary_metric_init_note())
-    result = str(
-        click.prompt(
-            "Metric spec",
-            default=initial_value or PRIMARY_METRIC_SPEC_EXAMPLE,
-            show_default=bool(initial_value),
-        )
-    )
-    if not result.strip():
-        raise AutoevolveError(
-            "Metric is required for `Set up now`. Otherwise choose scaffold mode."
-        )
-    try:
-        parse_primary_metric_spec(result.strip())
-    except ValueError as error:
-        raise AutoevolveError(str(error)) from error
-    return result.strip()
-
-
-def ask_metric_description(initial_value: str) -> str:
-    return str(
-        click.prompt(
-            "Metric description (optional)",
-            default=initial_value,
-            show_default=bool(initial_value),
-        )
-    ).strip()
-
-
-def ask_constraints(initial_value: str) -> str:
-    return str(
-        click.prompt(
-            "Constraints or non-goals",
-            default=initial_value,
-            show_default=bool(initial_value),
-        )
-    ).strip()
-
-
-def ask_validation(initial_value: str) -> str:
-    result = str(
-        click.prompt(
-            "Validation",
-            default=initial_value,
-            show_default=bool(initial_value),
-        )
-    )
-    if not result.strip():
-        raise AutoevolveError(
-            "Validation is required for `Set up now`. Otherwise choose scaffold mode."
-        )
-    return result.strip()
-
-
-def confirm_write(repo_root: str, skip_prompt: bool) -> None:
-    click.echo(f"Repository\n{repo_root}")
-    if skip_prompt:
-        return
-    if not click.confirm("Initialize autoevolve in this repository?", default=True):
-        raise SystemExit(0)
 
 
 def write_file_with_confirmation(
@@ -219,19 +115,16 @@ def write_file_with_confirmation(
     return True
 
 
-def _read_if_exists(path: str) -> str | None:
-    if not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as handle:
-        return handle.read()
-
-
 def write_continue_hook_files(
     repo_root: str, harness: Harness, overwrite_by_default: bool
 ) -> list[str]:
     written: list[str] = []
     for file_spec in get_harness_spec(harness).continue_hook_files:
-        existing_text = _read_if_exists(resolve_repo_path(repo_root, file_spec.path))
+        absolute_path = resolve_repo_path(repo_root, file_spec.path)
+        existing_text = None
+        if os.path.exists(absolute_path):
+            with open(absolute_path, encoding="utf-8") as handle:
+                existing_text = handle.read()
         wrote = write_file_with_confirmation(
             repo_root,
             file_spec.path,
@@ -255,8 +148,9 @@ def run_init(
     yes: bool = False,
 ) -> None:
     repo_root = find_repo_root(os.getcwd())
-
-    confirm_write(repo_root, yes)
+    click.echo(f"Repository\n{repo_root}")
+    if not yes and not click.confirm("Initialize autoevolve in this repository?", default=True):
+        raise SystemExit(0)
 
     selected_harness = harness or choose_harness(DEFAULT_HARNESS)
     harness_spec = get_harness_spec(selected_harness)
@@ -272,17 +166,14 @@ def run_init(
     prompt_text = build_harness_prompt(selected_harness)
     existing_problem_path = resolve_repo_path(repo_root, ROOT_FILES.problem)
     has_existing_problem = os.path.exists(existing_problem_path)
+    has_problem_inputs = any(
+        value is not None
+        for value in [mode, goal, metric, metric_description, constraints, validation]
+    )
     keep_existing_problem = (
         has_existing_problem
-        and not has_explicit_problem_inputs(
-            mode,
-            goal,
-            metric,
-            metric_description,
-            constraints,
-            validation,
-        )
-        and (True if yes else choose_keep_existing_problem())
+        and not has_problem_inputs
+        and (yes or click.confirm(f"Keep the existing {ROOT_FILES.problem}?", default=True))
     )
 
     selected_mode = None if keep_existing_problem else (mode or choose_setup_mode("now"))
@@ -293,8 +184,25 @@ def run_init(
     selected_validation = ""
 
     if selected_mode == "now":
-        selected_goal = require_filled_value(goal or ask_goal(""), "goal")
-        selected_metric = require_filled_value(metric or ask_metric_spec(""), "metric")
+        selected_goal = require_filled_value(
+            goal or str(click.prompt("Goal", default="", show_default=False)),
+            "goal",
+        )
+        if metric is not None:
+            selected_metric = require_filled_value(metric, "metric")
+        else:
+            click.echo("Metric Format")
+            click.echo(build_primary_metric_init_note())
+            selected_metric = require_filled_value(
+                str(
+                    click.prompt(
+                        "Metric spec",
+                        default=PRIMARY_METRIC_SPEC_EXAMPLE,
+                        show_default=False,
+                    )
+                ),
+                "metric",
+            )
         try:
             parse_primary_metric_spec(selected_metric)
         except ValueError as error:
@@ -302,11 +210,31 @@ def run_init(
         selected_metric_description = (
             metric_description
             if metric_description is not None
-            else (ask_metric_description("") if metric is None else "")
+            else (
+                str(
+                    click.prompt(
+                        "Metric description (optional)",
+                        default="",
+                        show_default=False,
+                    )
+                ).strip()
+                if metric is None
+                else ""
+            )
         )
-        selected_constraints = constraints if constraints is not None else ask_constraints("")
+        selected_constraints = (
+            constraints
+            if constraints is not None
+            else str(
+                click.prompt(
+                    "Constraints or non-goals",
+                    default="",
+                    show_default=False,
+                )
+            ).strip()
+        )
         selected_validation = require_filled_value(
-            validation or ask_validation(""),
+            validation or str(click.prompt("Validation", default="", show_default=False)),
             "validation",
         )
 
@@ -383,7 +311,7 @@ def run_init(
             repo_root,
             written_files,
             "ask your agent to finish setup.",
-            build_setup_handoff_prompt(),
+            "Follow the setup instructions for autoevolve.",
         )
         return
 
@@ -391,7 +319,7 @@ def run_init(
         repo_root,
         written_files,
         "ask your agent to verify setup and begin the experiment loop.",
-        build_loop_handoff_prompt(),
+        "Start autoevolve.",
     )
 
 
