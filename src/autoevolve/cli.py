@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
-from typing import cast
+from collections.abc import Callable, Sequence
+from typing import Any, cast, overload
 
 import click
 
@@ -38,12 +38,6 @@ TOP_LEVEL_EXAMPLES = (
     "autoevolve recent --limit 5",
     "autoevolve best --max benchmark_score --limit 5",
 )
-COMMAND_SECTIONS = (
-    ("Human", ("init", "validate")),
-    ("Lifecycle", ("start", "record", "clean")),
-    ("Inspect", ("status", "list", "show", "compare", "graph")),
-    ("Analytics", ("recent", "best", "pareto")),
-)
 TOP_LEVEL_EPILOG = "\n".join(
     [
         "Examples:",
@@ -76,33 +70,54 @@ class DepthParamType(click.ParamType):
 
 
 DEPTH = DepthParamType()
+CommandCallback = Callable[..., Any]
 
 
 class AutoevolveGroup(click.Group):
+    @overload
+    def command(self, __func: CommandCallback, /) -> click.Command: ...
+
+    @overload
+    def command(
+        self,
+        *args: Any,
+        section: str = "Other",
+        **kwargs: Any,
+    ) -> Callable[[CommandCallback], click.Command]: ...
+
+    def command(
+        self,
+        *args: Any,
+        section: str = "Other",
+        **kwargs: Any,
+    ) -> click.Command | Callable[[CommandCallback], click.Command]:
+        result = super().command(*args, **kwargs)
+        if isinstance(result, click.Command):
+            result.help_section = section  # type: ignore[attr-defined]
+            return result
+        decorator = cast(Callable[[CommandCallback], click.Command], result)
+
+        def wrapper(callback: CommandCallback) -> click.Command:
+            command = decorator(callback)
+            command.help_section = section  # type: ignore[attr-defined]
+            return command
+
+        return wrapper
+
     def list_commands(self, ctx: click.Context) -> list[str]:
-        ordered_names: list[str] = []
-        for _, names in COMMAND_SECTIONS:
-            ordered_names.extend(names)
-        visible_names = [
-            name
-            for name in ordered_names
-            if name in self.commands and not self.commands[name].hidden
-        ]
-        remaining_names = sorted(
-            name
-            for name, command in self.commands.items()
-            if not command.hidden and name not in visible_names
-        )
-        return [*visible_names, *remaining_names]
+        return [name for name, command in self.commands.items() if not command.hidden]
 
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
-        for title, command_names in COMMAND_SECTIONS:
-            rows: list[tuple[str, str]] = []
-            for command_name in command_names:
-                command = self.get_command(ctx, command_name)
-                if command is None or command.hidden:
-                    continue
-                rows.append((command_name, command.get_short_help_str(formatter.width)))
+        sections: dict[str, list[tuple[str, str]]] = {}
+        for command_name in self.list_commands(ctx):
+            command = self.get_command(ctx, command_name)
+            if command is None or command.hidden:
+                continue
+            section = getattr(command, "help_section", "Other")
+            rows = sections.setdefault(section, [])
+            rows.append((command_name, command.get_short_help_str(formatter.width)))
+
+        for title, rows in sections.items():
             if not rows:
                 continue
             with formatter.section(title):
@@ -129,6 +144,7 @@ def cli(ctx: click.Context) -> None:
 
 @cli.command(
     "init",
+    section="Human",
     short_help="Scaffold PROBLEM.md and agent instructions.",
     help=(
         "Scaffold PROBLEM.md and agent instructions.\n\n"
@@ -183,6 +199,7 @@ def init_command(
 
 @cli.command(
     "validate",
+    section="Human",
     short_help="Validate that the repo is correctly initialized for autoevolve.",
     help="Validate that the repo is correctly initialized for autoevolve.",
 )
@@ -192,6 +209,7 @@ def validate_command() -> None:
 
 @cli.command(
     "start",
+    section="Lifecycle",
     short_help="Create a managed experiment branch and worktree.",
     help=(
         "Create a managed experiment branch and worktree.\n\n"
@@ -208,6 +226,7 @@ def start_command(name: str, summary: str, from_ref: str | None) -> None:
 
 @cli.command(
     "record",
+    section="Lifecycle",
     short_help="Validate, commit, and remove the current managed worktree.",
     help=(
         "Validate, commit, and remove the current managed worktree.\n\n"
@@ -222,6 +241,7 @@ def record_command() -> None:
 
 @cli.command(
     "clean",
+    section="Lifecycle",
     short_help="Remove stale managed worktrees for this repository.",
     help=(
         "Remove stale managed worktrees for this repository.\n\n"
@@ -237,6 +257,7 @@ def clean_command(name: str | None, force: bool) -> None:
 
 @cli.command(
     "status",
+    section="Inspect",
     short_help="Show the current experiment snapshot.",
     help="Show the current experiment snapshot.",
 )
@@ -247,6 +268,7 @@ def status_command(output_format: str) -> None:
 
 @cli.command(
     "list",
+    section="Inspect",
     short_help="List recent experiments.",
     help="List recent experiments in a compact human-readable log.",
 )
@@ -257,6 +279,7 @@ def list_command(limit: int) -> None:
 
 @cli.command(
     "show",
+    section="Inspect",
     short_help="Show JOURNAL.md and EXPERIMENT.json for one ref.",
     help="Show JOURNAL.md and EXPERIMENT.json for one ref.",
 )
@@ -268,6 +291,7 @@ def show_command(ref: str, output_format: str) -> None:
 
 @cli.command(
     "compare",
+    section="Inspect",
     short_help="Compare two experiment commits.",
     help="Compare two experiment commits.",
 )
@@ -281,6 +305,7 @@ def compare_command(left_ref: str, right_ref: str, output_format: str, patch: bo
 
 @cli.command(
     "graph",
+    section="Inspect",
     short_help="Traverse lineage around one ref.",
     help="Traverse lineage around one ref.",
 )
@@ -317,6 +342,7 @@ def graph_command(
 
 @cli.command(
     "recent",
+    section="Analytics",
     short_help="Return the most recent experiments.",
     help="Return the most recent experiments.",
 )
@@ -334,6 +360,7 @@ def recent_command(limit: int, output_format: str) -> None:
 
 @cli.command(
     "best",
+    section="Analytics",
     short_help="Return the top experiments for one objective.",
     help=(
         "Return the top experiments for one objective.\n\n"
@@ -368,6 +395,7 @@ def best_command(
 
 @cli.command(
     "pareto",
+    section="Analytics",
     short_help="Return the Pareto frontier for the selected objectives.",
     help="Return the Pareto frontier for the selected objectives.",
 )
