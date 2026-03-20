@@ -103,9 +103,7 @@ def run_git(cwd: str | Path, args: list[str]) -> str:
     return result.stdout
 
 
-def run_git_with_env(
-    cwd: str | Path, args: list[str], extra_env: dict[str, str]
-) -> str:
+def run_git_with_env(cwd: str | Path, args: list[str], extra_env: dict[str, str]) -> str:
     env = os.environ.copy()
     env.update(extra_env)
     result = subprocess.run(
@@ -173,9 +171,7 @@ def init_repo_from_fixture() -> str:
     return str(repo_path)
 
 
-def commit_all(
-    repo_path: str | Path, message: str, date: str = "2026-01-01T11:00:00Z"
-) -> None:
+def commit_all(repo_path: str | Path, message: str, date: str = "2026-01-01T11:00:00Z") -> None:
     run_git(repo_path, ["add", "."])
     run_git_with_env(
         repo_path,
@@ -232,9 +228,7 @@ def populate_synthetic_branches(repo_path: str | Path) -> dict[str, str]:
             ),
         )
         commit_all(repo_path, f"Record {experiment.branch} experiment", experiment.date)
-        commit_by_branch[experiment.branch] = run_git(
-            repo_path, ["rev-parse", "HEAD"]
-        ).strip()
+        commit_by_branch[experiment.branch] = run_git(repo_path, ["rev-parse", "HEAD"]).strip()
     run_git(repo_path, ["checkout", main_branch])
     return commit_by_branch
 
@@ -248,14 +242,14 @@ Repository
 <PATH_1>
 Review
 Harness: other
-Files: PROBLEM.md, AUTOEVOLVE.md
+Files: PROBLEM.md, PROGRAM.md
 Autoevolve initialized.
 
 Repository: <PATH_1>
 
 Files written:
   - PROBLEM.md
-  - AUTOEVOLVE.md
+  - PROGRAM.md
 
 Next: ask your agent to finish setup.
 
@@ -264,7 +258,7 @@ For example:
 """
     )
     assert Path(repo_path, "PROBLEM.md").exists()
-    assert Path(repo_path, "AUTOEVOLVE.md").exists()
+    assert Path(repo_path, "PROGRAM.md").exists()
 
     validate = run(["validate"], cwd=repo_path, expect_failure=True)
     assert (
@@ -304,6 +298,7 @@ Analytics:
   pareto  Return the Pareto frontier for the selected objectives.
 
 Examples:
+  autoevolve init
   autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844
   autoevolve record
   autoevolve list
@@ -327,14 +322,14 @@ Repository
 <PATH_1>
 Review
 Harness: other
-Files: PROBLEM.md, AUTOEVOLVE.md
+Files: PROBLEM.md, PROGRAM.md
 Autoevolve initialized.
 
 Repository: <PATH_1>
 
 Files written:
   - PROBLEM.md
-  - AUTOEVOLVE.md
+  - PROGRAM.md
 
 Next: ask your agent to finish setup.
 
@@ -372,13 +367,13 @@ Repository
 Review
 Harness: other
 Problem: Keep existing PROBLEM.md
-Files: keep PROBLEM.md, write AUTOEVOLVE.md
+Files: keep PROBLEM.md, write PROGRAM.md
 Autoevolve initialized.
 
 Repository: <PATH_1>
 
 Files written:
-  - AUTOEVOLVE.md
+  - PROGRAM.md
 
 Next: ask your agent to finish setup.
 
@@ -572,9 +567,7 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
     bogus_list = run(["list", "--bogus"], cwd=repo_path, expect_failure=True)
     assert_click_error(bogus_list.stderr, "No such option: --bogus")
 
-    legacy_list_selectors = run(
-        ["list", "--text", "premium"], cwd=repo_path, expect_failure=True
-    )
+    legacy_list_selectors = run(["list", "--text", "premium"], cwd=repo_path, expect_failure=True)
     assert_click_error(legacy_list_selectors.stderr, "No such option: --text")
 
     recent = run(["recent"], cwd=repo_path)
@@ -635,9 +628,7 @@ sha	date	subject	tips	metrics	summary
         ["best", "--max", "benchmark_score", "--limit", "2", "--format", "jsonl"],
         cwd=repo_path,
     )
-    best_json_records = [
-        json.loads(line) for line in best_json.stdout.strip().splitlines() if line
-    ]
+    best_json_records = [json.loads(line) for line in best_json.stdout.strip().splitlines() if line]
     assert len(best_json_records) == 2
     assert best_json_records[0] == IsPartialDict(
         short_sha=IsStr(regex=r"[0-9a-f]{7}"),
@@ -650,9 +641,7 @@ sha	date	subject	tips	metrics	summary
         metrics=IsPartialDict(benchmark_score=0.913, runtime_sec=1.03),
     )
 
-    legacy_best_selectors = run(
-        ["best", "--active"], cwd=repo_path, expect_failure=True
-    )
+    legacy_best_selectors = run(["best", "--active"], cwd=repo_path, expect_failure=True)
     assert_click_error(legacy_best_selectors.stderr, "No such option: --active")
 
     fastest = run(["best", "--min", "runtime_sec", "--limit", "1"], cwd=repo_path)
@@ -663,9 +652,7 @@ sha	date	subject	tips	metrics	summary
 """
     )
 
-    pareto = run(
-        ["pareto", "--max", "benchmark_score", "--min", "runtime_sec"], cwd=repo_path
-    )
+    pareto = run(["pareto", "--max", "benchmark_score", "--min", "runtime_sec"], cwd=repo_path)
     assert normalize_text(pareto.stdout) == snapshot(
         """\
 sha	date	subject	tips	metrics	summary
@@ -801,8 +788,7 @@ edges:
         for edge in graph_record["edges"]
     )
     assert any(
-        edge["kind"] == "reference"
-        and edge["to"] == commit_by_branch["island-c/premium-guard"]
+        edge["kind"] == "reference" and edge["to"] == commit_by_branch["island-c/premium-guard"]
         for edge in graph_record["edges"]
     )
     references_only_graph = run(
@@ -899,23 +885,14 @@ ongoing experiments (managed worktrees):
         status_record["checkout"]["nearestExperimentAncestor"]["sha"]
         == commit_by_branch["cross/hybrid-final"]
     )
-    assert (
-        status_record["activeRecordedTips"][0]["sha"]
-        == commit_by_branch["cross/hybrid-final"]
-    )
-    assert (
-        status_record["activeRecordedTips"][1]["sha"]
-        == commit_by_branch["island-a/balanced-v2"]
-    )
+    assert status_record["activeRecordedTips"][0]["sha"] == commit_by_branch["cross/hybrid-final"]
+    assert status_record["activeRecordedTips"][1]["sha"] == commit_by_branch["island-a/balanced-v2"]
     assert any(
-        main_branch in entry["branches"]
-        for entry in status_record["activeTipsMissingRecord"]
+        main_branch in entry["branches"] for entry in status_record["activeTipsMissingRecord"]
     )
 
     run_git(repo_path, ["checkout", main_branch])
-    compare = run(
-        ["compare", "island-a/balanced-v2", "cross/hybrid-final"], cwd=repo_path
-    )
+    compare = run(["compare", "island-a/balanced-v2", "cross/hybrid-final"], cwd=repo_path)
     assert normalize_text(compare.stdout) == snapshot(
         """\
 left:  <SHA_1>  2026-01-01T12:10:00+00:00  Record island-a/balanced-v2 experiment [island-a/balanced-v2] - benchmark_score=0.913, runtime_sec=1.03 | Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
@@ -989,9 +966,7 @@ right summary: Hybrid final is the best synthetic experiment and explicitly comb
     )
     sibling_compare_record = json.loads(sibling_compare_json.stdout)
     assert sibling_compare_record["git"]["relationship"] == "sibling"
-    assert sibling_compare_record["git"]["sharedParents"] == [
-        commit_by_branch["island-a/baseline"]
-    ]
+    assert sibling_compare_record["git"]["sharedParents"] == [commit_by_branch["island-a/baseline"]]
 
     Path(repo_path, "JOURNAL.md").write_text(
         "# Notes\n\nCurrent checkout is incomplete.\n", encoding="utf-8"
@@ -1208,16 +1183,10 @@ Path: <PATH_1>
 
     stub_journal = Path(worktree_path, "JOURNAL.md").read_text(encoding="utf-8")
     assert "TODO: fill this in once you're done with your experiment." in stub_journal
-    stub_experiment = json.loads(
-        Path(worktree_path, "EXPERIMENT.json").read_text(encoding="utf-8")
-    )
-    assert (
-        stub_experiment["summary"] == "Trial run starts from the managed seed branch."
-    )
+    stub_experiment = json.loads(Path(worktree_path, "EXPERIMENT.json").read_text(encoding="utf-8"))
+    assert stub_experiment["summary"] == "Trial run starts from the managed seed branch."
 
-    stub_commit = run(
-        ["record"], cwd=worktree_path, env={"HOME": temp_home}, expect_failure=True
-    )
+    stub_commit = run(["record"], cwd=worktree_path, env={"HOME": temp_home}, expect_failure=True)
     assert "Replace the JOURNAL.md stub before committing." in stub_commit.stderr
 
     Path(worktree_path, "JOURNAL.md").write_text(
@@ -1268,9 +1237,7 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
     non_experiment_base_branch = "autoevolve/not-recorded"
     existing_branch = "autoevolve/existing-branch"
 
-    missing_name = run(
-        ["start"], cwd=repo_path, env={"HOME": temp_home}, expect_failure=True
-    )
+    missing_name = run(["start"], cwd=repo_path, env={"HOME": temp_home}, expect_failure=True)
     assert_click_error(missing_name.stderr, "Missing argument 'NAME'.")
 
     missing_summary = run(
@@ -1326,9 +1293,7 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
     )
     assert "not a valid experiment name" in invalid_name.stderr
 
-    non_experiment_base_sha = run_git(
-        repo_path, ["rev-parse", non_experiment_base_branch]
-    ).strip()
+    non_experiment_base_sha = run_git(repo_path, ["rev-parse", non_experiment_base_branch]).strip()
     from_sha = run(
         [
             "start",
@@ -1358,10 +1323,7 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
         env={"HOME": temp_home},
         expect_failure=True,
     )
-    assert (
-        'Branch "autoevolve/existing-branch" already exists.'
-        in branch_exists_result.stderr
-    )
+    assert 'Branch "autoevolve/existing-branch" already exists.' in branch_exists_result.stderr
 
     conflict_path = Path(temp_home) / ".autoevolve" / "worktrees" / "path-conflict"
     conflict_path.mkdir(parents=True, exist_ok=True)
@@ -1385,18 +1347,12 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
         ["record"], cwd=repo_path, env={"HOME": temp_home}, expect_failure=True
     )
     assert (
-        "record only works on managed autoevolve experiment branches"
-        in non_managed_commit.stderr
+        "record only works on managed autoevolve experiment branches" in non_managed_commit.stderr
     )
 
     run_git(repo_path, ["checkout", current_seed_branch])
-    primary_commit = run(
-        ["record"], cwd=repo_path, env={"HOME": temp_home}, expect_failure=True
-    )
-    assert (
-        "record must be run from a managed autoevolve worktree under"
-        in primary_commit.stderr
-    )
+    primary_commit = run(["record"], cwd=repo_path, env={"HOME": temp_home}, expect_failure=True)
+    assert "record must be run from a managed autoevolve worktree under" in primary_commit.stderr
     run_git(repo_path, ["checkout", original_branch])
 
 
@@ -1450,9 +1406,7 @@ def test_continue_hooks() -> None:
                 hooks=IsPartialDict(
                     Stop=[
                         IsPartialDict(
-                            hooks=[
-                                IsPartialDict(type="command", command=expected_command)
-                            ]
+                            hooks=[IsPartialDict(type="command", command=expected_command)]
                         )
                     ]
                 )
@@ -1475,9 +1429,7 @@ def test_continue_hooks() -> None:
                 )
             )
         else:
-            config_text = Path(repo_path, ".codex/config.toml").read_text(
-                encoding="utf-8"
-            )
+            config_text = Path(repo_path, ".codex/config.toml").read_text(encoding="utf-8")
             assert "[features]" in config_text
             assert "codex_hooks = true" in config_text
             hooks = read_json_file(Path(repo_path, ".codex/hooks.json"))
@@ -1485,9 +1437,7 @@ def test_continue_hooks() -> None:
                 hooks=IsPartialDict(
                     Stop=[
                         IsPartialDict(
-                            hooks=[
-                                IsPartialDict(type="command", command=expected_command)
-                            ]
+                            hooks=[IsPartialDict(type="command", command=expected_command)]
                         )
                     ]
                 )

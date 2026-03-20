@@ -209,8 +209,7 @@ def run_validate() -> None:
 
     if not find_prompt_files(repo_root):
         problems.append(
-            f"Missing prompt file. Expected {ROOT_FILES.autoevolve} or a "
-            "supported harness skill file."
+            f"Missing prompt file. Expected {ROOT_FILES.program} or a supported harness skill file."
         )
 
     if has_experiment_files(repo_root):

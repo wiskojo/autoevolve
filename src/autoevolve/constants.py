@@ -7,10 +7,10 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class RootFiles:
-    autoevolve: str = "AUTOEVOLVE.md"
     experiment: str = "EXPERIMENT.json"
     journal: str = "JOURNAL.md"
     problem: str = "PROBLEM.md"
+    program: str = "PROGRAM.md"
 
 
 ROOT_FILES = RootFiles()

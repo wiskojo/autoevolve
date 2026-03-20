@@ -150,7 +150,7 @@ HARNESS_SPECS = {
         ),
     ),
     Harness.OTHER: HarnessSpec(
-        prompt_path=ROOT_FILES.autoevolve,
+        prompt_path=ROOT_FILES.program,
         uses_skill_frontmatter=False,
     ),
 }
