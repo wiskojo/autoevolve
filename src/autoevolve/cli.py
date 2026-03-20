@@ -51,7 +51,7 @@ Analytics:
 
 Examples:
   autoevolve init
-  autoevolve start tune-thresholds "Try a tighter threshold sweep" --from autoevolve/seed
+  autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844
   autoevolve record
   autoevolve list
   autoevolve recent --limit 5
