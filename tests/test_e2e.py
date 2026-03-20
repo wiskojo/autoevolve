@@ -25,7 +25,7 @@ from tests.experiments import (
 THIS_FILE = Path(__file__).resolve()
 PROJECT_ROOT = THIS_FILE.parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"
-FIXTURE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "python-playground"
+FIXTURE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "playground"
 HEX_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
 AGE_RE = re.compile(r"\((?:just now|[0-9]+[a-z]+ ago)\)")
 

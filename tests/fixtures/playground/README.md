@@ -1,6 +1,6 @@
-# Python Playground
+# Playground
 
-This is a tiny Python repository used for both automated end-to-end tests and
+This is a tiny repository used for both automated end-to-end tests and
 the autoevolve playground flow.
 
 The validation command is:

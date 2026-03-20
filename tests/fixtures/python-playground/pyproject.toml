@@ -1,5 +1,0 @@
-[project]
-name = "python-playground"
-version = "0.1.0"
-description = "Tiny Python playground for autoevolve"
-requires-python = ">=3.8"

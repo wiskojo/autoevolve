@@ -1,0 +1,5 @@
+[project]
+name = "playground"
+version = "0.1.0"
+description = "Tiny playground for autoevolve"
+requires-python = ">=3.8"
