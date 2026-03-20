@@ -7,7 +7,7 @@ from typing import Any, cast
 import click
 
 from autoevolve.commands.analytics import run_best, run_pareto, run_recent
-from autoevolve.commands.human import run_init, run_validate
+from autoevolve.commands.human import run_init, run_update, run_validate
 from autoevolve.commands.inspect import (
     run_compare,
     run_lineage,
@@ -166,6 +166,22 @@ def init_command(
 )
 def validate_command() -> None:
     run_validate()
+
+
+@cli.command(
+    "update",
+    cls=SectionedCommand,
+    section="Human",
+    short_help="Update detected prompt files to the latest version.",
+    help=(
+        "Update detected prompt files to the latest version.\n\n"
+        "update refreshes any detected harness prompt files in the current "
+        "repository. It asks before overwriting PROGRAM.md unless --yes is set."
+    ),
+)
+@click.option("--yes", is_flag=True, help="Skip confirmation prompts.")
+def update_command(yes: bool) -> None:
+    run_update(yes)
 
 
 @cli.command(

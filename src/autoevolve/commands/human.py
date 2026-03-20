@@ -12,6 +12,7 @@ from autoevolve.harnesses import (
     HARNESS_NAMES,
     Harness,
     get_harness_spec,
+    parse_harness,
 )
 from autoevolve.problem import parse_problem_primary_metric
 from autoevolve.prompt import ProblemTemplateOptions, build_harness_prompt, build_problem_template
@@ -41,6 +42,25 @@ def print_post_init_summary(
     click.echo("")
     click.echo("For example:")
     click.echo(f"  {example_prompt}")
+
+
+def print_post_update_summary(
+    repo_root: str,
+    updated_files: list[str],
+    skipped_files: list[str],
+) -> None:
+    click.echo("")
+    click.echo(f"Repository: {repo_root}")
+    if updated_files:
+        click.echo("")
+        click.echo("Files updated:")
+        for file_name in updated_files:
+            click.echo(f"  - {file_name}")
+    if skipped_files:
+        click.echo("")
+        click.echo("Files skipped:")
+        for file_name in skipped_files:
+            click.echo(f"  - {file_name}")
 
 
 def choose_harness(initial_value: Harness) -> Harness:
@@ -191,6 +211,40 @@ def run_init(
         "ask your agent to finish setup.",
         harness_spec.handoff_prompt,
     )
+
+
+def run_update(yes: bool = False) -> None:
+    repo_root = find_repo_root(os.getcwd())
+    prompt_files = find_prompt_files(repo_root)
+    if not prompt_files:
+        raise AutoevolveError("No prompt files found. Run autoevolve init first.")
+
+    click.echo(f"Repository\n{repo_root}")
+    click.echo("Detected prompts")
+    for prompt_file in prompt_files:
+        click.echo(f"- {prompt_file['relative_path']} ({prompt_file['harness']})")
+
+    updated_files: list[str] = []
+    skipped_files: list[str] = []
+    for prompt_file in prompt_files:
+        relative_path = prompt_file["relative_path"]
+        harness = parse_harness(prompt_file["harness"])
+        wrote = write_file_with_confirmation(
+            repo_root,
+            relative_path,
+            build_harness_prompt(harness),
+            overwrite_by_default=yes or relative_path != ROOT_FILES.program,
+        )
+        if wrote:
+            updated_files.append(relative_path)
+        else:
+            skipped_files.append(relative_path)
+
+    if updated_files:
+        click.echo("autoevolve prompts updated.")
+    else:
+        click.echo("No prompt files updated.")
+    print_post_update_summary(repo_root, updated_files, skipped_files)
 
 
 def run_validate() -> None:

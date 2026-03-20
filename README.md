@@ -35,6 +35,7 @@ uv run python -m autoevolve --help
 - `init`
   - Writes a stub `PROBLEM.md` if one does not exist, and preserves an existing `PROBLEM.md`.
 - `validate`
+- `update`
 - `start`
 - `record`
 - `clean`

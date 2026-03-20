@@ -13,7 +13,8 @@ import pytest
 from dirty_equals import IsPartialDict, IsStr
 from inline_snapshot import snapshot
 
-from autoevolve.prompt import build_protocol_body
+from autoevolve.harnesses import Harness
+from autoevolve.prompt import build_harness_prompt, build_protocol_body
 from tests.experiments import (
     EXPERIMENTS,
     build_experiment_object,
@@ -279,6 +280,7 @@ Options:
 Human:
   init      Set up PROBLEM.md and agent instructions.
   validate  Check that the repo is ready for autoevolve.
+  update    Update detected prompt files to the latest version.
 
 Lifecycle:
   start     Create a managed experiment branch and worktree.
@@ -385,7 +387,7 @@ For example:
 
 def test_legacy_commands_removed() -> None:
     repo_path = init_repo_from_fixture()
-    for command in ["graph", "list", "update", "results", "search"]:
+    for command in ["graph", "list", "results", "search"]:
         result = run([command], cwd=repo_path, expect_failure=True)
         assert_click_error(result.stderr, f"No such command '{command}'.")
 
@@ -477,6 +479,62 @@ def test_removed_init_problem_options() -> None:
         assert_click_error(result.stderr, f"No such option: {option}")
     positional_harness = run(["init", "other", "--yes"], cwd=repo_path, expect_failure=True)
     assert_click_error(positional_harness.stderr, "Got unexpected extra argument (other)")
+
+
+def test_update_skips_program_without_confirmation() -> None:
+    repo_path = init_repo_from_fixture()
+    run(["init", "--harness", "other", "--yes"], cwd=repo_path)
+    run(["init", "--harness", "codex", "--yes"], cwd=repo_path)
+    program_path = Path(repo_path, "PROGRAM.md")
+    codex_prompt_path = Path(repo_path, ".codex/skills/autoevolve/SKILL.md")
+    program_path.write_text("stale program prompt\n", encoding="utf-8")
+    codex_prompt_path.write_text("stale codex prompt\n", encoding="utf-8")
+
+    result = run(["update"], cwd=repo_path, input_text="n\n")
+    assert normalize_text(result.stdout, repo_path) == snapshot(
+        """\
+Repository
+<PATH_1>
+Detected prompts
+- .codex/skills/autoevolve/SKILL.md (codex)
+- PROGRAM.md (other)
+Overwrite PROGRAM.md? [y/N]: autoevolve prompts updated.
+
+Repository: <PATH_1>
+
+Files updated:
+  - .codex/skills/autoevolve/SKILL.md
+
+Files skipped:
+  - PROGRAM.md
+"""
+    )
+    assert program_path.read_text(encoding="utf-8") == "stale program prompt\n"
+    assert codex_prompt_path.read_text(encoding="utf-8") == build_harness_prompt(Harness.CODEX)
+
+
+def test_update_yes_updates_program() -> None:
+    repo_path = init_repo_from_fixture()
+    run(["init", "--harness", "other", "--yes"], cwd=repo_path)
+    program_path = Path(repo_path, "PROGRAM.md")
+    program_path.write_text("stale program prompt\n", encoding="utf-8")
+
+    result = run(["update", "--yes"], cwd=repo_path)
+    assert normalize_text(result.stdout, repo_path) == snapshot(
+        """\
+Repository
+<PATH_1>
+Detected prompts
+- PROGRAM.md (other)
+autoevolve prompts updated.
+
+Repository: <PATH_1>
+
+Files updated:
+  - PROGRAM.md
+"""
+    )
+    assert program_path.read_text(encoding="utf-8") == build_harness_prompt(Harness.OTHER)
 
 
 def test_protocol_prompt_lifecycle_guidance() -> None:
