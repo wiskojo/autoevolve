@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Sequence
-from typing import Any, cast, overload
+from collections.abc import Sequence
+from typing import Any, cast
 
 import click
 
@@ -70,40 +70,17 @@ class DepthParamType(click.ParamType):
 
 
 DEPTH = DepthParamType()
-CommandCallback = Callable[..., Any]
+
+
+class SectionedCommand(click.Command):
+    section: str
+
+    def __init__(self, *args: Any, section: str = "Other", **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.section = section
 
 
 class AutoevolveGroup(click.Group):
-    @overload
-    def command(self, __func: CommandCallback, /) -> click.Command: ...
-
-    @overload
-    def command(
-        self,
-        *args: Any,
-        section: str = "Other",
-        **kwargs: Any,
-    ) -> Callable[[CommandCallback], click.Command]: ...
-
-    def command(
-        self,
-        *args: Any,
-        section: str = "Other",
-        **kwargs: Any,
-    ) -> click.Command | Callable[[CommandCallback], click.Command]:
-        result = super().command(*args, **kwargs)
-        if isinstance(result, click.Command):
-            result.help_section = section  # type: ignore[attr-defined]
-            return result
-        decorator = cast(Callable[[CommandCallback], click.Command], result)
-
-        def wrapper(callback: CommandCallback) -> click.Command:
-            command = decorator(callback)
-            command.help_section = section  # type: ignore[attr-defined]
-            return command
-
-        return wrapper
-
     def list_commands(self, ctx: click.Context) -> list[str]:
         return [name for name, command in self.commands.items() if not command.hidden]
 
@@ -113,7 +90,7 @@ class AutoevolveGroup(click.Group):
             command = self.get_command(ctx, command_name)
             if command is None or command.hidden:
                 continue
-            section = getattr(command, "help_section", "Other")
+            section = command.section if isinstance(command, SectionedCommand) else "Other"
             rows = sections.setdefault(section, [])
             rows.append((command_name, command.get_short_help_str(formatter.width)))
 
@@ -144,6 +121,7 @@ def cli(ctx: click.Context) -> None:
 
 @cli.command(
     "init",
+    cls=SectionedCommand,
     section="Human",
     short_help="Scaffold PROBLEM.md and agent instructions.",
     help=(
@@ -199,6 +177,7 @@ def init_command(
 
 @cli.command(
     "validate",
+    cls=SectionedCommand,
     section="Human",
     short_help="Validate that the repo is correctly initialized for autoevolve.",
     help="Validate that the repo is correctly initialized for autoevolve.",
@@ -209,6 +188,7 @@ def validate_command() -> None:
 
 @cli.command(
     "start",
+    cls=SectionedCommand,
     section="Lifecycle",
     short_help="Create a managed experiment branch and worktree.",
     help=(
@@ -226,6 +206,7 @@ def start_command(name: str, summary: str, from_ref: str | None) -> None:
 
 @cli.command(
     "record",
+    cls=SectionedCommand,
     section="Lifecycle",
     short_help="Validate, commit, and remove the current managed worktree.",
     help=(
@@ -241,6 +222,7 @@ def record_command() -> None:
 
 @cli.command(
     "clean",
+    cls=SectionedCommand,
     section="Lifecycle",
     short_help="Remove stale managed worktrees for this repository.",
     help=(
@@ -257,6 +239,7 @@ def clean_command(name: str | None, force: bool) -> None:
 
 @cli.command(
     "status",
+    cls=SectionedCommand,
     section="Inspect",
     short_help="Show the current experiment snapshot.",
     help="Show the current experiment snapshot.",
@@ -268,6 +251,7 @@ def status_command(output_format: str) -> None:
 
 @cli.command(
     "list",
+    cls=SectionedCommand,
     section="Inspect",
     short_help="List recent experiments.",
     help="List recent experiments in a compact human-readable log.",
@@ -279,6 +263,7 @@ def list_command(limit: int) -> None:
 
 @cli.command(
     "show",
+    cls=SectionedCommand,
     section="Inspect",
     short_help="Show JOURNAL.md and EXPERIMENT.json for one ref.",
     help="Show JOURNAL.md and EXPERIMENT.json for one ref.",
@@ -291,6 +276,7 @@ def show_command(ref: str, output_format: str) -> None:
 
 @cli.command(
     "compare",
+    cls=SectionedCommand,
     section="Inspect",
     short_help="Compare two experiment commits.",
     help="Compare two experiment commits.",
@@ -305,6 +291,7 @@ def compare_command(left_ref: str, right_ref: str, output_format: str, patch: bo
 
 @cli.command(
     "graph",
+    cls=SectionedCommand,
     section="Inspect",
     short_help="Traverse lineage around one ref.",
     help="Traverse lineage around one ref.",
@@ -342,6 +329,7 @@ def graph_command(
 
 @cli.command(
     "recent",
+    cls=SectionedCommand,
     section="Analytics",
     short_help="Return the most recent experiments.",
     help="Return the most recent experiments.",
@@ -360,6 +348,7 @@ def recent_command(limit: int, output_format: str) -> None:
 
 @cli.command(
     "best",
+    cls=SectionedCommand,
     section="Analytics",
     short_help="Return the top experiments for one objective.",
     help=(
@@ -395,6 +384,7 @@ def best_command(
 
 @cli.command(
     "pareto",
+    cls=SectionedCommand,
     section="Analytics",
     short_help="Return the Pareto frontier for the selected objectives.",
     help="Return the Pareto frontier for the selected objectives.",
