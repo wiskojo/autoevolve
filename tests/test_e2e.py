@@ -277,8 +277,8 @@ Options:
   --help  Show this message and exit.
 
 Human:
-  init      Scaffold PROBLEM.md and agent instructions.
-  validate  Validate that the repo is correctly initialized for autoevolve.
+  init      Set up PROBLEM.md and agent instructions.
+  validate  Check that the repo is ready for autoevolve.
 
 Lifecycle:
   start     Create a managed experiment branch and worktree.
@@ -290,12 +290,12 @@ Inspect:
   log       Show experiment logs.
   show      Show experiment details.
   compare   Compare two experiments.
-  lineage   Traverse experiment lineage.
+  lineage   Show experiment lineage around one ref.
 
 Analytics:
-  recent    Return the most recent experiments.
-  best      Return the top experiments for one metric.
-  pareto    Return the Pareto frontier for the selected metrics.
+  recent    List the most recent recorded experiments.
+  best      List the top experiments for one metric.
+  pareto    List the Pareto frontier for selected metrics.
 
 Examples:
   autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844

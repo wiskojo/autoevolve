@@ -126,9 +126,9 @@ def cli(ctx: click.Context) -> None:
     "init",
     cls=SectionedCommand,
     section="Human",
-    short_help="Scaffold PROBLEM.md and agent instructions.",
+    short_help="Set up PROBLEM.md and agent instructions.",
     help=(
-        "Scaffold PROBLEM.md and agent instructions.\n\n"
+        "Set up PROBLEM.md and agent instructions.\n\n"
         f"If {ROOT_FILES.problem} does not exist, init writes a stub. If it already exists, "
         "init leaves it unchanged. If no harness is provided, init prompts for one. "
         "Use --yes to skip confirmation prompts and write files immediately."
@@ -162,8 +162,12 @@ def init_command(
     "validate",
     cls=SectionedCommand,
     section="Human",
-    short_help="Validate that the repo is correctly initialized for autoevolve.",
-    help="Validate that the repo is correctly initialized for autoevolve.",
+    short_help="Check that the repo is ready for autoevolve.",
+    help=(
+        "Check that the repo is ready for autoevolve.\n\n"
+        "validate checks the required protocol files and validates the current "
+        "experiment record when one is present."
+    ),
 )
 def validate_command() -> None:
     run_validate()
@@ -225,7 +229,11 @@ def clean_command(name: str | None, force: bool) -> None:
     cls=SectionedCommand,
     section="Inspect",
     short_help="Show the current experiment status.",
-    help="Show the current experiment status.",
+    help=(
+        "Show the current experiment status.\n\n"
+        "status shows the checkout state, recent results, and managed worktrees "
+        "for the current repository."
+    ),
 )
 def status_command() -> None:
     run_status()
@@ -236,7 +244,11 @@ def status_command() -> None:
     cls=SectionedCommand,
     section="Inspect",
     short_help="Show experiment logs.",
-    help="Show recent experiment logs with full metrics and JOURNAL.md content.",
+    help=(
+        "Show experiment logs.\n\n"
+        "log shows the most recent recorded experiments with full metrics and "
+        "JOURNAL.md content."
+    ),
 )
 @click.option("--limit", type=click.IntRange(min=1), default=10, show_default=True)
 def log_command(limit: int) -> None:
@@ -248,7 +260,10 @@ def log_command(limit: int) -> None:
     cls=SectionedCommand,
     section="Inspect",
     short_help="Show experiment details.",
-    help="Show experiment details.",
+    help=(
+        "Show experiment details.\n\n"
+        "show prints JOURNAL.md and EXPERIMENT.json for one recorded experiment."
+    ),
 )
 @click.argument("ref")
 def show_command(ref: str) -> None:
@@ -260,7 +275,11 @@ def show_command(ref: str) -> None:
     cls=SectionedCommand,
     section="Inspect",
     short_help="Compare two experiments.",
-    help="Compare two experiments.",
+    help=(
+        "Compare two experiments.\n\n"
+        "compare shows commit metadata, summaries, metrics, lineage relationship, "
+        "and an optional patch."
+    ),
 )
 @click.argument("left_ref")
 @click.argument("right_ref")
@@ -273,8 +292,12 @@ def compare_command(left_ref: str, right_ref: str, patch: bool) -> None:
     "lineage",
     cls=SectionedCommand,
     section="Inspect",
-    short_help="Traverse experiment lineage.",
-    help="Traverse experiment lineage.",
+    short_help="Show experiment lineage around one ref.",
+    help=(
+        "Show experiment lineage around one ref.\n\n"
+        "lineage traverses git ancestry and recorded references around one "
+        "experiment."
+    ),
 )
 @click.argument("ref")
 @click.option(
@@ -308,8 +331,12 @@ def lineage_command(
     "recent",
     cls=SectionedCommand,
     section="Analytics",
-    short_help="Return the most recent experiments.",
-    help="Return the most recent experiments.",
+    short_help="List the most recent recorded experiments.",
+    help=(
+        "List the most recent recorded experiments.\n\n"
+        "recent emits recent experiments in TSV or JSONL format for scripting "
+        "and analysis."
+    ),
 )
 @click.option("--limit", type=click.IntRange(min=1), default=10, show_default=True)
 @click.option(
@@ -327,10 +354,11 @@ def recent_command(limit: int, output_format: str) -> None:
     "best",
     cls=SectionedCommand,
     section="Analytics",
-    short_help="Return the top experiments for one metric.",
+    short_help="List the top experiments for one metric.",
     help=(
-        "Return the top experiments for one metric.\n\n"
-        "If no metric is provided, best defaults to the primary metric from PROBLEM.md."
+        "List the top experiments for one metric.\n\n"
+        "best ranks recorded experiments by one metric. If no metric is "
+        "provided, it defaults to the primary metric from PROBLEM.md."
     ),
 )
 @click.option("--max", "max_metric", help="Metric to maximize.")
@@ -363,8 +391,12 @@ def best_command(
     "pareto",
     cls=SectionedCommand,
     section="Analytics",
-    short_help="Return the Pareto frontier for the selected metrics.",
-    help="Return the Pareto frontier for the selected metrics.",
+    short_help="List the Pareto frontier for selected metrics.",
+    help=(
+        "List the Pareto frontier for selected metrics.\n\n"
+        "pareto returns the non-dominated recorded experiments for the selected "
+        "metrics in TSV or JSONL format."
+    ),
 )
 @click.option("--max", "max_metrics", multiple=True, help="Metric to maximize. Repeat as needed.")
 @click.option("--min", "min_metrics", multiple=True, help="Metric to minimize. Repeat as needed.")
