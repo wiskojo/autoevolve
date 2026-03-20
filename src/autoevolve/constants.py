@@ -14,6 +14,7 @@ class RootFiles:
 
 
 ROOT_FILES = RootFiles()
+MANAGED_EXPERIMENT_BRANCH_PREFIX = "autoevolve/"
 MANAGED_WORKTREE_ROOT = str(Path.home() / ".autoevolve" / "worktrees")
 
 HARNESS_PATHS = {

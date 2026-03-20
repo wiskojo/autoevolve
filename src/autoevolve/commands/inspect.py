@@ -5,44 +5,34 @@ import os
 import re
 from collections import deque
 from datetime import datetime, timezone
+from functools import cmp_to_key
 from typing import Any
 
 import click
 
 from autoevolve.commands.shared import (
     apply_limit,
-    build_changed_paths,
     build_experiment_object_for_output,
-    build_experiment_output_by_sha,
-    build_git_child_map,
-    build_git_parent_map,
-    build_incoming_reference_map,
-    build_metric_diff,
-    build_parent_metric_delta,
-    build_reference_diff,
     build_tip_map,
-    describe_git_relationship,
-    find_git_experiment_ancestor,
-    format_experiment_line,
-    format_metric_value,
-    get_current_branch_label,
     get_experiment_records,
-    get_head_sha,
     get_managed_experiment_name,
     get_record_numeric_metric_value,
-    inspect_active_tip_entry,
-    inspect_current_record_state,
-    is_checkout_dirty,
     is_managed_experiment_branch,
     list_autoevolve_branches,
     list_repo_worktrees,
-    resolve_ref,
-    sort_tip_entries,
     try_read_file_at_ref,
 )
 from autoevolve.constants import ROOT_FILES
 from autoevolve.errors import AutoevolveError
-from autoevolve.gittools import find_repo_root, run_git
+from autoevolve.gittools import (
+    find_repo_root,
+    get_current_branch_label,
+    get_head_sha,
+    is_checkout_dirty,
+    resolve_ref,
+    run_git,
+    try_git,
+)
 from autoevolve.models import (
     ExperimentRecord,
     GraphDirection,
@@ -256,6 +246,456 @@ def format_duration_ms(duration_ms: int) -> str:
         if duration_ms >= millis:
             return f"{round(duration_ms / millis)}{label}"
     return "0m"
+
+
+def _build_primary_metric_problems(
+    metrics: dict[str, Any] | None, primary_metric: PrimaryMetricSpec | None
+) -> list[str]:
+    if primary_metric is None:
+        return []
+    if metrics is None or primary_metric.metric not in metrics:
+        return [f'missing primary metric "{primary_metric.metric}"']
+    value = metrics[primary_metric.metric]
+    if not is_number(value):
+        return [f'primary metric "{primary_metric.metric}" is not numeric']
+    return []
+
+
+def _build_tip_status_entry(
+    sha: str,
+    branches: list[str],
+    date: str | None,
+    subject: str,
+    summary: str | None,
+    metrics: dict[str, Any] | None,
+    primary_metric: PrimaryMetricSpec | None,
+    problems: list[str],
+) -> dict[str, Any]:
+    primary_metric_value = None
+    if primary_metric is not None and metrics is not None:
+        candidate = metrics.get(primary_metric.metric)
+        if is_number(candidate):
+            primary_metric_value = candidate
+    return {
+        "branches": branches,
+        "date": date,
+        "metrics": metrics,
+        "primaryMetricValue": primary_metric_value,
+        "problems": problems,
+        "sha": sha,
+        "shortSha": short_sha(sha),
+        "subject": subject,
+        "summary": summary,
+    }
+
+
+def inspect_current_record_state(
+    repo_root: str, primary_metric: PrimaryMetricSpec | None
+) -> dict[str, Any]:
+    has_journal = file_exists(repo_root, ROOT_FILES.journal)
+    has_experiment = file_exists(repo_root, ROOT_FILES.experiment)
+    problems: list[str] = []
+
+    if not has_journal and not has_experiment:
+        return {
+            "kind": "missing",
+            "problems": [
+                (
+                    "no current experiment record; add "
+                    f"{ROOT_FILES.journal} and {ROOT_FILES.experiment}"
+                )
+            ],
+        }
+
+    if not has_journal or not has_experiment:
+        if not has_journal:
+            problems.append(f"missing {ROOT_FILES.journal}")
+        if not has_experiment:
+            problems.append(f"missing {ROOT_FILES.experiment}")
+        return {"kind": "incomplete", "problems": problems}
+
+    journal_text = read_text_file(repo_root, ROOT_FILES.journal).strip()
+    if not journal_text:
+        problems.append(f"{ROOT_FILES.journal} is empty")
+
+    try:
+        parsed_experiment = parse_experiment_json(read_text_file(repo_root, ROOT_FILES.experiment))
+        problems.extend(_build_primary_metric_problems(parsed_experiment.metrics, primary_metric))
+    except AutoevolveError as error:
+        problems.append(f"invalid {ROOT_FILES.experiment}: {error}")
+
+    if problems:
+        return {"kind": "invalid", "problems": problems}
+    return {"kind": "recorded", "problems": []}
+
+
+def _get_commit_metadata(repo_root: str, ref: str) -> dict[str, str]:
+    output = run_git(repo_root, ["show", "-s", "--format=%cI%x09%s", ref]).strip()
+    parts = output.split("\t", 1)
+    if len(parts) != 2 or not parts[0]:
+        raise AutoevolveError(f"Unexpected git show output: {output}")
+    return {"date": parts[0], "subject": parts[1]}
+
+
+def inspect_active_tip_entry(
+    repo_root: str,
+    sha: str,
+    branches: list[str],
+    record_map: dict[str, ExperimentRecord],
+    primary_metric: PrimaryMetricSpec | None,
+) -> tuple[dict[str, Any], str]:
+    record = record_map.get(sha)
+    if record is not None:
+        problems: list[str] = []
+        if not record.journal_text.strip():
+            problems.append(f"{ROOT_FILES.journal} is empty")
+        if record.parse_error:
+            problems.append(f"invalid {ROOT_FILES.experiment}: {record.parse_error}")
+        else:
+            problems.extend(
+                _build_primary_metric_problems(
+                    record.parsed.metrics if record.parsed else None, primary_metric
+                )
+            )
+        kind = "ok" if not problems else "invalid"
+        return (
+            _build_tip_status_entry(
+                sha,
+                branches,
+                record.date,
+                record.subject,
+                record.parsed.summary if record.parsed else None,
+                record.parsed.metrics if record.parsed else None,
+                primary_metric,
+                problems,
+            ),
+            kind,
+        )
+
+    journal_text = try_read_file_at_ref(repo_root, sha, ROOT_FILES.journal)
+    experiment_text = try_read_file_at_ref(repo_root, sha, ROOT_FILES.experiment)
+    missing_problems: list[str] = []
+    if journal_text is None and experiment_text is None:
+        missing_problems.append(
+            f"tip does not contain {ROOT_FILES.journal} or {ROOT_FILES.experiment}"
+        )
+    else:
+        if journal_text is None:
+            missing_problems.append(f"missing {ROOT_FILES.journal} at branch tip")
+        if experiment_text is None:
+            missing_problems.append(f"missing {ROOT_FILES.experiment} at branch tip")
+    metadata = _get_commit_metadata(repo_root, sha)
+    return (
+        _build_tip_status_entry(
+            sha,
+            branches,
+            metadata["date"],
+            metadata["subject"],
+            None,
+            None,
+            primary_metric,
+            missing_problems,
+        ),
+        "missing",
+    )
+
+
+def _compare_tip_entries_by_metric(
+    left: dict[str, Any], right: dict[str, Any], primary_metric: PrimaryMetricSpec
+) -> int:
+    left_value = left.get("primaryMetricValue")
+    right_value = right.get("primaryMetricValue")
+    if left_value is None and right_value is None:
+        left_date = left.get("date") or ""
+        right_date = right.get("date") or ""
+        if right_date > left_date:
+            return 1
+        if right_date < left_date:
+            return -1
+        return 0
+    if left_value is None:
+        return 1
+    if right_value is None:
+        return -1
+    if left_value == right_value:
+        if (right.get("date") or "") > (left.get("date") or ""):
+            return 1
+        if (right.get("date") or "") < (left.get("date") or ""):
+            return -1
+        return 0
+    if primary_metric.direction == "min":
+        return -1 if left_value < right_value else 1
+    return -1 if left_value > right_value else 1
+
+
+def sort_tip_entries(
+    entries: list[dict[str, Any]], primary_metric: PrimaryMetricSpec | None
+) -> list[dict[str, Any]]:
+    def compare(left: dict[str, Any], right: dict[str, Any]) -> int:
+        if primary_metric is not None:
+            metric_comparison = _compare_tip_entries_by_metric(left, right, primary_metric)
+            if metric_comparison != 0:
+                return metric_comparison
+        left_date = left.get("date") or ""
+        right_date = right.get("date") or ""
+        if left_date and right_date and left_date != right_date:
+            if right_date > left_date:
+                return 1
+            return -1
+        left_branch = left.get("branches", [""])[0] if left.get("branches") else ""
+        right_branch = right.get("branches", [""])[0] if right.get("branches") else ""
+        if left_branch < right_branch:
+            return -1
+        if left_branch > right_branch:
+            return 1
+        return 0
+
+    return sorted(entries, key=cmp_to_key(compare))
+
+
+def _get_parents(repo_root: str, ref: str) -> list[str]:
+    output = run_git(repo_root, ["rev-list", "--parents", "-n", "1", ref]).strip()
+    if not output:
+        return []
+    return output.split(" ")[1:]
+
+
+def find_git_experiment_ancestor(
+    repo_root: str, starting_sha: str, experiment_shas: set[str]
+) -> str | None:
+    current: str | None = starting_sha
+    while current is not None:
+        if current in experiment_shas:
+            return current
+        parents = _get_parents(repo_root, current)
+        current = parents[0] if parents else None
+    return None
+
+
+def build_experiment_output_by_sha(
+    sha: str, record_map: dict[str, ExperimentRecord]
+) -> dict[str, Any]:
+    record = record_map.get(sha)
+    if record is not None:
+        return build_experiment_object_for_output(record)
+    return {
+        "sha": sha,
+        "short_sha": short_sha(sha),
+        "date": "",
+        "journal_excerpt": "",
+        "metrics": None,
+        "parse_error": "not an experiment commit",
+        "references": None,
+        "subject": "",
+        "summary": None,
+        "tips": [],
+    }
+
+
+def format_experiment_line(record: ExperimentRecord) -> str:
+    tips = f" [{', '.join(record.tip_branches)}]" if record.tip_branches else ""
+    details: list[str] = []
+    if record.parsed:
+        metrics = format_metric_pairs(record.parsed.metrics)
+        if metrics:
+            details.append(metrics)
+        if record.parsed.summary:
+            details.append(record.parsed.summary)
+    elif record.parse_error:
+        details.append(f"invalid EXPERIMENT.json: {record.parse_error}")
+    suffix = f" - {' | '.join(details)}" if details else ""
+    return f"{short_sha(record.sha)}  {record.date}  {record.subject}{tips}{suffix}"
+
+
+def build_git_parent_map(repo_root: str, records: list[ExperimentRecord]) -> dict[str, list[str]]:
+    experiment_shas = {record.sha for record in records}
+    parent_map: dict[str, list[str]] = {}
+    for record in records:
+        parents = _get_parents(repo_root, record.sha)
+        compressed_parents: list[str] = []
+        for parent in parents:
+            ancestor = find_git_experiment_ancestor(repo_root, parent, experiment_shas)
+            if ancestor and ancestor not in compressed_parents:
+                compressed_parents.append(ancestor)
+        parent_map[record.sha] = compressed_parents
+    return parent_map
+
+
+def build_git_child_map(parent_map: dict[str, list[str]]) -> dict[str, list[str]]:
+    child_map: dict[str, list[str]] = {}
+    for child, parents in parent_map.items():
+        for parent in parents:
+            child_map.setdefault(parent, []).append(child)
+    return child_map
+
+
+def build_incoming_reference_map(
+    records: list[ExperimentRecord],
+) -> dict[str, list[dict[str, str]]]:
+    incoming_map: dict[str, list[dict[str, str]]] = {}
+    for record in records:
+        for reference in (record.parsed.references or []) if record.parsed else []:
+            incoming_map.setdefault(reference.commit, []).append(
+                {"from": record.sha, "why": reference.why}
+            )
+    return incoming_map
+
+
+def _get_merge_base(repo_root: str, left_sha: str, right_sha: str) -> str | None:
+    return try_git(repo_root, ["merge-base", left_sha, right_sha]) or None
+
+
+def describe_git_relationship(
+    repo_root: str,
+    left_sha: str,
+    right_sha: str,
+    git_parent_map: dict[str, list[str]],
+) -> dict[str, Any]:
+    if left_sha == right_sha:
+        return {"mergeBase": left_sha, "relationship": "same", "sharedParents": []}
+
+    right_parents = git_parent_map.get(right_sha, [])
+    if left_sha in right_parents:
+        return {
+            "mergeBase": left_sha,
+            "relationship": "direct_parent_of_right",
+            "sharedParents": [],
+        }
+
+    left_parents = git_parent_map.get(left_sha, [])
+    if right_sha in left_parents:
+        return {
+            "mergeBase": right_sha,
+            "relationship": "direct_parent_of_left",
+            "sharedParents": [],
+        }
+
+    shared_parents = sorted(parent for parent in left_parents if parent in right_parents)
+    if shared_parents:
+        return {
+            "mergeBase": _get_merge_base(repo_root, left_sha, right_sha),
+            "relationship": "sibling",
+            "sharedParents": shared_parents,
+        }
+
+    merge_base = _get_merge_base(repo_root, left_sha, right_sha)
+    if merge_base == left_sha:
+        return {
+            "mergeBase": merge_base,
+            "relationship": "left_ancestor_of_right",
+            "sharedParents": [],
+        }
+    if merge_base == right_sha:
+        return {
+            "mergeBase": merge_base,
+            "relationship": "right_ancestor_of_left",
+            "sharedParents": [],
+        }
+    return {"mergeBase": merge_base, "relationship": "diverged", "sharedParents": []}
+
+
+def build_changed_paths(repo_root: str, left_sha: str, right_sha: str) -> list[dict[str, Any]]:
+    output = run_git(repo_root, ["diff", "--name-status", left_sha, right_sha]).strip()
+    if not output:
+        return []
+    changed_paths: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        parts = line.split("\t")
+        status = parts[0] if parts else ""
+        first_path = parts[1] if len(parts) > 1 else ""
+        second_path = parts[2] if len(parts) > 2 else None
+        if not status or not first_path:
+            raise AutoevolveError(f"Unexpected git diff --name-status output: {line}")
+        if status.startswith(("R", "C")):
+            changed_paths.append(
+                {
+                    "path": second_path or first_path,
+                    "previousPath": first_path if second_path else None,
+                    "status": status,
+                }
+            )
+            continue
+        changed_paths.append({"path": first_path, "previousPath": None, "status": status})
+    return changed_paths
+
+
+def build_parent_metric_delta(
+    record: ExperimentRecord,
+    git_parent_map: dict[str, list[str]],
+    record_map: dict[str, ExperimentRecord],
+) -> dict[str, Any] | None:
+    parents = git_parent_map.get(record.sha, [])
+    if len(parents) != 1:
+        return None
+    parent_sha = parents[0]
+    parent_record = record_map.get(parent_sha)
+    if parent_record is None:
+        return None
+    metric_names = set(
+        parent_record.parsed.metrics.keys()
+        if parent_record.parsed and parent_record.parsed.metrics
+        else []
+    )
+    if record.parsed and record.parsed.metrics:
+        metric_names.update(record.parsed.metrics.keys())
+    metrics: dict[str, Any] = {}
+    for metric in metric_names:
+        parent_value = (
+            parent_record.parsed.metrics.get(metric)
+            if parent_record.parsed and parent_record.parsed.metrics
+            else None
+        )
+        current_value = (
+            record.parsed.metrics.get(metric) if record.parsed and record.parsed.metrics else None
+        )
+        if not is_number(parent_value) or not is_number(current_value):
+            continue
+        metrics[metric] = {
+            "current": current_value,
+            "delta": current_value - parent_value,
+            "parent": parent_value,
+        }
+    if not metrics:
+        return None
+    return {"metrics": metrics, "parent": parent_sha}
+
+
+def build_metric_diff(left: ExperimentRecord, right: ExperimentRecord) -> dict[str, Any]:
+    metric_names = set(left.parsed.metrics.keys() if left.parsed and left.parsed.metrics else [])
+    if right.parsed and right.parsed.metrics:
+        metric_names.update(right.parsed.metrics.keys())
+    diff: dict[str, Any] = {}
+    for metric in sorted(metric_names):
+        left_value = (
+            left.parsed.metrics.get(metric) if left.parsed and left.parsed.metrics else None
+        )
+        right_value = (
+            right.parsed.metrics.get(metric) if right.parsed and right.parsed.metrics else None
+        )
+        diff[metric] = {
+            "left": left_value,
+            "right": right_value,
+            "delta": right_value - left_value
+            if is_number(left_value) and is_number(right_value)
+            else None,
+        }
+    return diff
+
+
+def build_reference_diff(left: ExperimentRecord, right: ExperimentRecord) -> dict[str, list[str]]:
+    left_references = left.parsed.references if left.parsed and left.parsed.references else []
+    right_references = right.parsed.references if right.parsed and right.parsed.references else []
+    left_commits = {reference.commit for reference in left_references}
+    right_commits = {reference.commit for reference in right_references}
+    return {
+        "common": sorted(left_commits & right_commits),
+        "leftOnly": sorted(left_commits - right_commits),
+        "rightOnly": sorted(right_commits - left_commits),
+    }
+
+
+def format_metric_value(value: Any) -> str:
+    return "null" if value is None else json.dumps(value)
 
 
 def build_status_output(repo_root: str, records: list[ExperimentRecord]) -> dict[str, Any]:

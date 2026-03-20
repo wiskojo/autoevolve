@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from typing import Any
@@ -7,27 +8,96 @@ from typing import Any
 import click
 
 from autoevolve.commands.shared import (
-    MANAGED_EXPERIMENT_BRANCH_PREFIX,
-    build_experiment_stub,
-    build_journal_stub,
-    delete_managed_experiment_branch_if_present,
-    describe_worktree_for_removal,
-    find_repo_worktree_by_path,
     get_managed_experiment_name,
     is_managed_experiment_branch,
-    is_managed_worktree_path,
     list_autoevolve_branches,
     list_repo_worktrees,
-    normalize_managed_experiment_name,
-    resolve_git_path,
-    resolve_managed_worktree_path,
-    resolve_new_experiment_base_ref,
-    validate_managed_branch_name,
 )
-from autoevolve.constants import MANAGED_WORKTREE_ROOT, ROOT_FILES
+from autoevolve.constants import (
+    MANAGED_EXPERIMENT_BRANCH_PREFIX,
+    MANAGED_WORKTREE_ROOT,
+    ROOT_FILES,
+)
 from autoevolve.errors import AutoevolveError
-from autoevolve.gittools import find_repo_root, run_git, run_git_with_git_dir
+from autoevolve.gittools import (
+    find_repo_root,
+    resolve_git_path,
+    resolve_path_if_present,
+    resolve_ref,
+    run_git,
+    run_git_with_git_dir,
+    try_git_with_git_dir,
+)
 from autoevolve.utils import parse_experiment_json, read_text_file, resolve_repo_path, short_sha
+
+JOURNAL_STUB_NOTE = "TODO: fill this in once you're done with your experiment."
+
+
+def build_journal_stub(name: str) -> str:
+    return f"# {name}\n\n{JOURNAL_STUB_NOTE}\n"
+
+
+def build_experiment_stub(summary: str) -> str:
+    return f"{json.dumps({'summary': summary, 'metrics': {}, 'references': []}, indent=2)}\n"
+
+
+def normalize_managed_experiment_name(name: str) -> str:
+    trimmed = name.strip()
+    if trimmed.startswith(MANAGED_EXPERIMENT_BRANCH_PREFIX):
+        return trimmed[len(MANAGED_EXPERIMENT_BRANCH_PREFIX) :]
+    return trimmed
+
+
+def is_managed_worktree_path(worktree_path: str) -> bool:
+    root = resolve_path_if_present(MANAGED_WORKTREE_ROOT)
+    resolved_worktree_path = resolve_path_if_present(worktree_path)
+    return resolved_worktree_path.startswith(f"{root}{os.sep}")
+
+
+def validate_managed_branch_name(repo_root: str, branch_name: str) -> None:
+    try:
+        run_git(repo_root, ["check-ref-format", f"refs/heads/{branch_name}"])
+    except AutoevolveError as error:
+        raise AutoevolveError(
+            f'"{branch_name}" is not a valid managed experiment branch name.'
+        ) from error
+
+
+def resolve_managed_worktree_path(experiment_name: str) -> str:
+    root = os.path.abspath(MANAGED_WORKTREE_ROOT)
+    worktree_path = os.path.abspath(os.path.join(root, experiment_name))
+    if worktree_path == root or not worktree_path.startswith(f"{root}{os.sep}"):
+        raise AutoevolveError(f'"{experiment_name}" is not a valid experiment name.')
+    return worktree_path
+
+
+def describe_worktree_for_removal(worktree: dict[str, Any]) -> str:
+    state = "missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean"
+    return (
+        f"{worktree['path']} ({worktree['branch'] or '(detached HEAD)'}, "
+        f"{state}, {worktree['shortHead']})"
+    )
+
+
+def resolve_new_experiment_base_ref(repo_root: str, explicit_base_ref: str) -> dict[str, str]:
+    current_branch = run_git(repo_root, ["branch", "--show-current"]).strip()
+    ref = explicit_base_ref or current_branch or "HEAD"
+    return {"ref": ref, "sha": resolve_ref(repo_root, ref)}
+
+
+def delete_managed_experiment_branch_if_present(
+    common_git_dir: str, branch_name: str | None
+) -> None:
+    if not branch_name or not is_managed_experiment_branch(branch_name):
+        return
+    exists = try_git_with_git_dir(
+        os.path.expanduser("~"),
+        common_git_dir,
+        ["show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
+    )
+    if exists is None:
+        return
+    run_git_with_git_dir(os.path.expanduser("~"), common_git_dir, ["branch", "-D", branch_name])
 
 
 def run_start(name: str, summary: str, from_ref: str | None = None) -> None:
@@ -112,8 +182,14 @@ def run_clean(name: str | None = None, force: bool = False) -> None:
     target_experiment_name = ""
     if name:
         target_experiment_name = normalize_managed_experiment_name(name)
-        target_worktree = find_repo_worktree_by_path(
-            repo_root, resolve_managed_worktree_path(target_experiment_name)
+        target_path = resolve_path_if_present(resolve_managed_worktree_path(target_experiment_name))
+        target_worktree = next(
+            (
+                worktree
+                for worktree in list_repo_worktrees(repo_root)
+                if worktree["path"] == target_path
+            ),
+            None,
         )
         if (
             target_worktree is None

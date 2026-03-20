@@ -69,6 +69,29 @@ def try_git_with_git_dir(working_dir: str, git_dir: str, args: Iterable[str]) ->
     return try_git(working_dir, command, cwd=working_dir)
 
 
+def resolve_ref(repo_root: str, ref: str) -> str:
+    return run_git(repo_root, ["rev-parse", "--verify", ref]).strip()
+
+
+def resolve_git_path(repo_root: str, rev_parse_flag: str) -> str:
+    return os.path.abspath(
+        os.path.join(repo_root, run_git(repo_root, ["rev-parse", rev_parse_flag]).strip())
+    )
+
+
+def get_head_sha(repo_root: str) -> str:
+    return run_git(repo_root, ["rev-parse", "HEAD"]).strip()
+
+
+def get_current_branch_label(repo_root: str) -> str:
+    branch = run_git(repo_root, ["branch", "--show-current"]).strip()
+    return branch or "(detached HEAD)"
+
+
+def is_checkout_dirty(repo_root: str) -> bool:
+    return bool(run_git(repo_root, ["status", "--porcelain"]).strip())
+
+
 def resolve_path_if_present(target_path: str) -> str:
     if not os.path.exists(target_path):
         return os.path.abspath(target_path)

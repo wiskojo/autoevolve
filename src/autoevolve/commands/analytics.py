@@ -9,21 +9,132 @@ import click
 from autoevolve.commands.shared import (
     apply_limit,
     build_experiment_object_for_output,
-    collect_metric_names,
-    dominates,
     get_experiment_records,
     get_record_numeric_metric_value,
-    resolve_best_objective,
-    validate_pareto_objectives,
 )
+from autoevolve.constants import ROOT_FILES
 from autoevolve.errors import AutoevolveError
 from autoevolve.gittools import find_repo_root
 from autoevolve.models import (
     ExperimentRecord,
+    MetricDirection,
     Objective,
     SetOutputFormat,
 )
-from autoevolve.utils import format_metric_pairs, short_sha, sort_iso_datetime_value
+from autoevolve.problem import parse_problem_primary_metric
+from autoevolve.utils import (
+    file_exists,
+    format_metric_pairs,
+    is_number,
+    read_text_file,
+    short_sha,
+    sort_iso_datetime_value,
+)
+
+
+def collect_metric_names(records: list[ExperimentRecord]) -> set[str]:
+    metric_names: set[str] = set()
+    for record in records:
+        if record.parsed and record.parsed.metrics:
+            metric_names.update(record.parsed.metrics.keys())
+    return metric_names
+
+
+def format_known_metrics(metric_names: set[str]) -> str:
+    return ", ".join(sorted(metric_names)) if metric_names else "none yet"
+
+
+def normalize_metric_field_name(field: str) -> str:
+    if field.startswith("metrics."):
+        metric_name = field[len("metrics.") :]
+        if not metric_name:
+            raise AutoevolveError("Metric fields must use metrics.<name>.")
+        return metric_name
+    return field
+
+
+def validate_metric_name(metric: str, metric_names: set[str], flag_name: str) -> str:
+    normalized = normalize_metric_field_name(metric)
+    if metric_names and normalized not in metric_names:
+        raise AutoevolveError(
+            f'{flag_name} unknown metric "{normalized}". Known metrics: '
+            f"{format_known_metrics(metric_names)}"
+        )
+    return normalized
+
+
+def resolve_best_objective(
+    repo_root: str,
+    metric_names: set[str],
+    direction: MetricDirection | None,
+    metric: str | None,
+) -> Objective:
+    if direction is not None:
+        return Objective(
+            direction=direction,
+            metric=validate_metric_name(metric or "", metric_names, f"--{direction}"),
+        )
+
+    if not file_exists(repo_root, ROOT_FILES.problem):
+        raise AutoevolveError(
+            "best requires an explicit objective, or a valid PROBLEM.md primary metric."
+        )
+
+    try:
+        primary_metric = parse_problem_primary_metric(read_text_file(repo_root, ROOT_FILES.problem))
+    except Exception as error:
+        raise AutoevolveError(
+            "best requires an explicit objective, or a valid PROBLEM.md primary metric."
+        ) from error
+
+    return Objective(
+        direction=primary_metric.direction,
+        metric=validate_metric_name(
+            primary_metric.metric,
+            metric_names,
+            f"--{primary_metric.direction}",
+        ),
+    )
+
+
+def validate_pareto_objectives(
+    objectives: list[Objective], metric_names: set[str]
+) -> list[Objective]:
+    return [
+        Objective(
+            direction=objective.direction,
+            metric=validate_metric_name(
+                objective.metric,
+                metric_names,
+                f"--{objective.direction}",
+            ),
+        )
+        for objective in objectives
+    ]
+
+
+def dominates(
+    candidate: ExperimentRecord,
+    challenger: ExperimentRecord,
+    objectives: list[Objective],
+) -> bool:
+    strictly_better = False
+    for objective in objectives:
+        candidate_value = get_record_numeric_metric_value(candidate, objective.metric)
+        challenger_value = get_record_numeric_metric_value(challenger, objective.metric)
+        if not is_number(candidate_value) or not is_number(challenger_value):
+            return False
+        if objective.direction == "max":
+            if candidate_value < challenger_value:
+                return False
+            if candidate_value > challenger_value:
+                strictly_better = True
+        else:
+            if candidate_value > challenger_value:
+                return False
+            if candidate_value < challenger_value:
+                strictly_better = True
+    return strictly_better
 
 
 def sanitize_tsv_field(value: str) -> str:
