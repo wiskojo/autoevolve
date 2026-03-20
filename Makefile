@@ -1,23 +1,23 @@
 .PHONY: sync format format-check lint mypy test build check
 
 sync:
-	uv sync --group dev
+	uv sync
 
 format:
-	uv run --group dev ruff format .
-	uv run --group dev ruff check --fix .
+	uv run ruff format .
+	uv run ruff check --fix .
 
 format-check:
-	uv run --group dev ruff format --check .
+	uv run ruff format --check .
 
 lint:
-	uv run --group dev ruff check .
+	uv run ruff check .
 
 mypy:
-	uv run --group dev mypy src
+	uv run mypy src
 
 test:
-	uv run --group dev pytest -q
+	uv run pytest -q
 
 build:
 	uv build

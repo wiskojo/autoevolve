@@ -39,9 +39,10 @@ ignore = ["E501"]
 
 [tool.mypy]
 strict = true
-disallow_incomplete_defs = false
-disallow_untyped_defs = false
-disallow_untyped_calls = false
+warn_return_any = true
+no_implicit_optional = true
+strict_equality = true
+warn_unreachable = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -8,7 +8,13 @@ import click
 
 from autoevolve.commands.analytics import run_best, run_pareto, run_recent
 from autoevolve.commands.human import run_init, run_validate
-from autoevolve.commands.inspect import run_compare, run_graph, run_list, run_show, run_status
+from autoevolve.commands.inspect import (
+    run_compare,
+    run_graph,
+    run_list,
+    run_show,
+    run_status,
+)
 from autoevolve.commands.lifecycle import run_clean, run_record, run_start
 from autoevolve.constants import (
     MANAGED_WORKTREE_ROOT,
