@@ -27,7 +27,6 @@ from autoevolve.models import (
     GraphDirection,
     GraphEdges,
     Objective,
-    ObjectOutputFormat,
     SetOutputFormat,
 )
 
@@ -228,9 +227,8 @@ def clean_command(name: str | None, force: bool) -> None:
     short_help="Show the current experiment status.",
     help="Show the current experiment status.",
 )
-@click.option("--format", "output_format", type=click.Choice(("text", "json")), default="text")
-def status_command(output_format: str) -> None:
-    run_status(cast(ObjectOutputFormat, output_format))
+def status_command() -> None:
+    run_status()
 
 
 @cli.command(
@@ -253,9 +251,8 @@ def log_command(limit: int) -> None:
     help="Show experiment details.",
 )
 @click.argument("ref")
-@click.option("--format", "output_format", type=click.Choice(("text", "json")), default="text")
-def show_command(ref: str, output_format: str) -> None:
-    run_show(ref, cast(ObjectOutputFormat, output_format))
+def show_command(ref: str) -> None:
+    run_show(ref)
 
 
 @cli.command(
@@ -267,10 +264,9 @@ def show_command(ref: str, output_format: str) -> None:
 )
 @click.argument("left_ref")
 @click.argument("right_ref")
-@click.option("--format", "output_format", type=click.Choice(("text", "json")), default="text")
 @click.option("--patch", is_flag=True, help="Include the git patch.")
-def compare_command(left_ref: str, right_ref: str, output_format: str, patch: bool) -> None:
-    run_compare(left_ref, right_ref, cast(ObjectOutputFormat, output_format), patch)
+def compare_command(left_ref: str, right_ref: str, patch: bool) -> None:
+    run_compare(left_ref, right_ref, patch)
 
 
 @cli.command(
@@ -294,20 +290,17 @@ def compare_command(left_ref: str, right_ref: str, output_format: str, patch: bo
     show_default=True,
 )
 @click.option("--depth", type=DEPTH, default="3", show_default=True)
-@click.option("--format", "output_format", type=click.Choice(("text", "json")), default="text")
 def lineage_command(
     ref: str,
     edges: str,
     direction: str,
     depth: int | None,
-    output_format: str,
 ) -> None:
     run_lineage(
         ref=ref,
         edges=cast(GraphEdges, edges),
         direction=cast(GraphDirection, direction),
         depth=depth,
-        output_format=cast(ObjectOutputFormat, output_format),
     )
 
 

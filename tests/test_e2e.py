@@ -752,31 +752,6 @@ edges:
 """
     )
 
-    lineage_json = run(
-        [
-            "lineage",
-            "cross/hybrid-final",
-            "--edges",
-            "all",
-            "--direction",
-            "backward",
-            "--depth",
-            "all",
-            "--format",
-            "json",
-        ],
-        cwd=repo_path,
-    )
-    lineage_record = json.loads(lineage_json.stdout)
-    assert lineage_record["root"] == commit_by_branch["cross/hybrid-final"]
-    assert any(
-        edge["kind"] == "git" and edge["to"] == commit_by_branch["island-a/balanced-v2"]
-        for edge in lineage_record["edges"]
-    )
-    assert any(
-        edge["kind"] == "reference" and edge["to"] == commit_by_branch["island-c/premium-guard"]
-        for edge in lineage_record["edges"]
-    )
     references_only_lineage = run(
         [
             "lineage",
@@ -787,19 +762,14 @@ edges:
             "backward",
             "--depth",
             "all",
-            "--format",
-            "json",
         ],
         cwd=repo_path,
     )
-    references_only_record = json.loads(references_only_lineage.stdout)
-    assert references_only_record["mode"] == "references"
-    assert references_only_record["edges"]
-    assert all(edge["kind"] == "reference" for edge in references_only_record["edges"])
-    assert any(
-        edge["to"] == commit_by_branch["island-c/premium-guard"]
-        for edge in references_only_record["edges"]
-    )
+    assert "mode: edges=references direction=backward depth=all" in references_only_lineage.stdout
+    references_only_edges = references_only_lineage.stdout.split("edges:\n", 1)[1]
+    assert "  git  " not in references_only_edges
+    assert "reference  " in references_only_edges
+    assert commit_by_branch["island-c/premium-guard"][:7] in references_only_edges
 
     default_lineage = run(["lineage", "cross/hybrid-final"], cwd=repo_path)
     assert normalize_text(default_lineage.stdout) == snapshot(
@@ -843,6 +813,13 @@ edges:
     status = run(["status"], cwd=repo_path)
     assert normalize_text(status.stdout, normalize_age=True) == snapshot(
         """\
+checkout:
+  branch: cross/hybrid-final
+  head: <SHA_1>
+  dirty: no
+  state: recorded
+  nearest experiment ancestor: <SHA_1>
+
 project:
   metric: max benchmark_score
   experiments: 12 recorded (0 ongoing)
@@ -859,22 +836,10 @@ latest experiments:
 ongoing experiments (managed worktrees):
   (none)
 
-"""
-    )
+tip branches missing experiment records:
+  main @ <SHA_6>: tip does not contain JOURNAL.md or EXPERIMENT.json
 
-    status_json = run(["status", "--format", "json"], cwd=repo_path)
-    status_record = json.loads(status_json.stdout)
-    assert status_record["checkout"]["branch"] == "cross/hybrid-final"
-    assert status_record["checkout"]["dirty"] is False
-    assert status_record["checkout"]["currentRecordState"]["kind"] == "recorded"
-    assert (
-        status_record["checkout"]["nearestExperimentAncestor"]["sha"]
-        == commit_by_branch["cross/hybrid-final"]
-    )
-    assert status_record["activeRecordedTips"][0]["sha"] == commit_by_branch["cross/hybrid-final"]
-    assert status_record["activeRecordedTips"][1]["sha"] == commit_by_branch["island-a/balanced-v2"]
-    assert any(
-        main_branch in entry["branches"] for entry in status_record["activeTipsMissingRecord"]
+"""
     )
 
     run_git(repo_path, ["checkout", main_branch])
@@ -922,49 +887,24 @@ right summary: Hybrid final is the best synthetic experiment and explicitly comb
         r"^diff --git a/EXPERIMENT\.json b/EXPERIMENT\.json", compare_patch.stdout, re.M
     )
 
-    compare_json = run(
-        ["compare", "island-a/balanced-v2", "cross/hybrid-final", "--format", "json"],
-        cwd=repo_path,
-    )
-    compare_record = json.loads(compare_json.stdout)
-    assert compare_record["git"]["relationship"] == "direct_parent_of_right"
-    assert any(
-        entry["path"] == "EXPERIMENT.json" and entry["status"] == "M"
-        for entry in compare_record["changedPaths"]
-    )
-    assert abs(compare_record["metrics"]["benchmark_score"]["delta"] - 0.005) < 1e-9
-    assert abs(compare_record["metrics"]["runtime_sec"]["delta"] - 0.05) < 1e-9
-    assert (
-        compare_record["parentDeltas"]["right"]["parent"]
-        == commit_by_branch["island-a/balanced-v2"]
-    )
-    assert len(compare_record["references"]["rightOnly"]) == 1
-
-    sibling_compare_json = run(
+    sibling_compare = run(
         [
             "compare",
             "island-b/boost-freshness",
             "island-c/clip-premium",
-            "--format",
-            "json",
         ],
         cwd=repo_path,
     )
-    sibling_compare_record = json.loads(sibling_compare_json.stdout)
-    assert sibling_compare_record["git"]["relationship"] == "sibling"
-    assert sibling_compare_record["git"]["sharedParents"] == [commit_by_branch["island-a/baseline"]]
+    assert "git:   sibling" in sibling_compare.stdout
+    assert commit_by_branch["island-a/baseline"][:7] in sibling_compare.stdout
 
     Path(repo_path, "JOURNAL.md").write_text(
         "# Notes\n\nCurrent checkout is incomplete.\n", encoding="utf-8"
     )
-    dirty_status_json = run(["status", "--format", "json"], cwd=repo_path)
-    dirty_status_record = json.loads(dirty_status_json.stdout)
-    assert dirty_status_record["checkout"]["dirty"] is True
-    assert dirty_status_record["checkout"]["currentRecordState"]["kind"] == "incomplete"
-    assert (
-        "missing EXPERIMENT.json"
-        in dirty_status_record["checkout"]["currentRecordState"]["problems"]
-    )
+    dirty_status = run(["status"], cwd=repo_path)
+    assert "  dirty: yes" in dirty_status.stdout
+    assert "  state: incomplete" in dirty_status.stdout
+    assert "missing EXPERIMENT.json" in dirty_status.stdout
     Path(repo_path, "JOURNAL.md").unlink()
 
     run_git(repo_path, ["checkout", "-b", "broken-tip"])
@@ -986,13 +926,10 @@ right summary: Hybrid final is the best synthetic experiment and explicitly comb
     commit_all(repo_path, "Record broken tip experiment", "2026-01-01T12:12:00Z")
     run_git(repo_path, ["checkout", current_branch(repo_path)])
 
-    invalid_status_json = run(["status", "--format", "json"], cwd=repo_path)
-    invalid_status_record = json.loads(invalid_status_json.stdout)
-    assert any(
-        "broken-tip" in entry["branches"]
-        and 'missing primary metric "benchmark_score"' in entry["problems"]
-        for entry in invalid_status_record["activeTipsNeedingAttention"]
-    )
+    invalid_status = run(["status"], cwd=repo_path)
+    assert "tip branches needing attention:" in invalid_status.stdout
+    assert "broken-tip" in invalid_status.stdout
+    assert 'missing primary metric "benchmark_score"' in invalid_status.stdout
 
     show = run(["show", "island-a/baseline"], cwd=repo_path)
     assert normalize_text(show.stdout) == snapshot(
@@ -1068,10 +1005,14 @@ Outcome:
 """
     )
 
-    show_json = run(["show", "cross/hybrid-final", "--format", "json"], cwd=repo_path)
-    show_record = json.loads(show_json.stdout)
-    assert show_record["experiment"]["metrics"]["benchmark_score"] == 0.918
-    assert len(show_record["experiment"]["references"]) == 2
+    for args in [
+        ["status", "--format", "json"],
+        ["show", "cross/hybrid-final", "--format", "json"],
+        ["compare", "island-a/balanced-v2", "cross/hybrid-final", "--format", "json"],
+        ["lineage", "cross/hybrid-final", "--format", "json"],
+    ]:
+        result = run(args, cwd=repo_path, expect_failure=True)
+        assert_click_error(result.stderr, "No such option: --format")
 
 
 def test_status_best_prefers_earliest_tie() -> None:

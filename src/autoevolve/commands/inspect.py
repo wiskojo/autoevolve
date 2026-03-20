@@ -37,7 +37,6 @@ from autoevolve.models import (
     ExperimentRecord,
     GraphDirection,
     GraphEdges,
-    ObjectOutputFormat,
     PrimaryMetricSpec,
 )
 from autoevolve.problem import parse_problem_primary_metric
@@ -471,26 +470,6 @@ def find_git_experiment_ancestor(
     return None
 
 
-def build_experiment_output_by_sha(
-    sha: str, record_map: dict[str, ExperimentRecord]
-) -> dict[str, Any]:
-    record = record_map.get(sha)
-    if record is not None:
-        return build_experiment_object_for_output(record)
-    return {
-        "sha": sha,
-        "short_sha": short_sha(sha),
-        "date": "",
-        "journal_excerpt": "",
-        "metrics": None,
-        "parse_error": "not an experiment commit",
-        "references": None,
-        "subject": "",
-        "summary": None,
-        "tips": [],
-    }
-
-
 def format_experiment_line(record: ExperimentRecord) -> str:
     tips = f" [{', '.join(record.tip_branches)}]" if record.tip_branches else ""
     details: list[str] = []
@@ -812,6 +791,20 @@ def print_status_output(status: dict[str, Any]) -> None:
         if not worktree["isPrimary"] and not worktree["isManagedExperiment"]
     ]
 
+    click.echo("checkout:")
+    click.echo(f"  branch: {status['checkout']['branch']}")
+    click.echo(f"  head: {status['checkout']['shortHead']}")
+    click.echo(f"  dirty: {'yes' if status['checkout']['dirty'] else 'no'}")
+    click.echo(f"  state: {status['checkout']['currentRecordState']['kind']}")
+    nearest_ancestor = status["checkout"]["nearestExperimentAncestor"]
+    if nearest_ancestor is not None:
+        click.echo(f"  nearest experiment ancestor: {nearest_ancestor['short_sha']}")
+    if status["checkout"]["currentRecordState"]["problems"]:
+        click.echo("  problems:")
+        for problem in status["checkout"]["currentRecordState"]["problems"]:
+            click.echo(f"    - {problem}")
+    click.echo("")
+
     click.echo("project:")
     if status["primaryMetric"]:
         click.echo(f"  metric: {status['primaryMetric']['raw']}")
@@ -847,6 +840,22 @@ def print_status_output(status: dict[str, Any]) -> None:
         for worktree in managed_worktrees:
             click.echo(f"  {format_managed_worktree_line(worktree)}")
     click.echo("")
+    if status["activeTipsNeedingAttention"]:
+        click.echo("tip branches needing attention:")
+        for entry in status["activeTipsNeedingAttention"]:
+            click.echo(
+                f"  {', '.join(entry['branches'])} @ {entry['shortSha']}: "
+                f"{'; '.join(entry['problems'])}"
+            )
+        click.echo("")
+    if status["activeTipsMissingRecord"]:
+        click.echo("tip branches missing experiment records:")
+        for entry in status["activeTipsMissingRecord"]:
+            click.echo(
+                f"  {', '.join(entry['branches'])} @ {entry['shortSha']}: "
+                f"{'; '.join(entry['problems'])}"
+            )
+        click.echo("")
     if unmanaged_worktrees:
         click.echo("other linked worktrees:")
         for worktree in unmanaged_worktrees:
@@ -970,12 +979,9 @@ def collect_graph(
     return {"edges": edge_list, "nodeOrder": node_order}
 
 
-def run_status(output_format: ObjectOutputFormat = "text") -> None:
+def run_status() -> None:
     repo_root = find_repo_root(os.getcwd())
     status = build_status_output(repo_root, get_experiment_records(repo_root))
-    if output_format == "json":
-        click.echo(json.dumps(status, indent=2))
-        return
     print_status_output(status)
 
 
@@ -1003,7 +1009,6 @@ def run_lineage(
     edges: GraphEdges = "all",
     direction: GraphDirection = "backward",
     depth: int | None = 3,
-    output_format: ObjectOutputFormat = "text",
 ) -> None:
     repo_root = find_repo_root(os.getcwd())
     records = get_experiment_records(repo_root)
@@ -1013,34 +1018,18 @@ def run_lineage(
     if starting_record is None:
         raise AutoevolveError(f"{ref} is not an experiment commit.")
     graph = collect_graph(repo_root, records, starting_sha, edges, direction, depth)
-    nodes = [build_experiment_output_by_sha(sha, record_map) for sha in graph["nodeOrder"]]
-    if output_format == "json":
-        click.echo(
-            json.dumps(
-                {
-                    "depth": depth,
-                    "direction": direction,
-                    "edges": graph["edges"],
-                    "mode": edges,
-                    "nodes": nodes,
-                    "ref": ref,
-                    "root": starting_sha,
-                },
-                indent=2,
-            )
-        )
-        return
     click.echo(f"root: {short_sha(starting_sha)}  {starting_record.subject}")
     click.echo(
         f"mode: edges={edges} direction={direction} depth={depth if depth is not None else 'all'}"
     )
     click.echo("")
     click.echo("nodes:")
-    for node in nodes:
+    for sha in graph["nodeOrder"]:
+        record = record_map.get(sha)
         label = (
-            f"{node['short_sha']}  {node['subject']}"
-            if node["subject"]
-            else f"{node['short_sha']}  [not an experiment commit]"
+            f"{short_sha(sha)}  {record.subject}"
+            if record is not None and record.subject
+            else f"{short_sha(sha)}  [not an experiment commit]"
         )
         click.echo(f"  {label}")
     click.echo("")
@@ -1058,7 +1047,6 @@ def run_lineage(
 def run_compare(
     left_ref: str,
     right_ref: str,
-    output_format: ObjectOutputFormat = "text",
     patch: bool = False,
 ) -> None:
     repo_root = find_repo_root(os.getcwd())
@@ -1083,24 +1071,6 @@ def run_compare(
     }
     diffstat = run_git(repo_root, ["diff", "--shortstat", left_sha, right_sha]).strip()
     patch_text = run_git(repo_root, ["diff", left_sha, right_sha]).rstrip() if patch else None
-    if output_format == "json":
-        click.echo(
-            json.dumps(
-                {
-                    "changedPaths": changed_paths,
-                    "diffstat": diffstat or None,
-                    "git": git_relationship,
-                    "left": build_experiment_object_for_output(left_record),
-                    "metrics": metric_diff,
-                    "patch": patch_text,
-                    "parentDeltas": parent_deltas,
-                    "references": reference_diff,
-                    "right": build_experiment_object_for_output(right_record),
-                },
-                indent=2,
-            )
-        )
-        return
     click.echo(f"left:  {format_experiment_line(left_record)}")
     click.echo(f"right: {format_experiment_line(right_record)}")
     git_details: list[str] = []
@@ -1196,7 +1166,7 @@ def run_compare(
         click.echo(patch_text)
 
 
-def run_show(ref: str, output_format: ObjectOutputFormat = "text") -> None:
+def run_show(ref: str) -> None:
     repo_root = find_repo_root(os.getcwd())
     journal = try_read_file_at_ref(repo_root, ref, ROOT_FILES.journal)
     experiment_text = try_read_file_at_ref(repo_root, ref, ROOT_FILES.experiment)
@@ -1204,34 +1174,6 @@ def run_show(ref: str, output_format: ObjectOutputFormat = "text") -> None:
         raise AutoevolveError(
             f"{ref} does not contain {ROOT_FILES.journal} or {ROOT_FILES.experiment}"
         )
-    if output_format == "json":
-        parsed = parse_experiment_json(experiment_text) if experiment_text is not None else None
-        click.echo(
-            json.dumps(
-                {
-                    "ref": ref,
-                    "journal": journal,
-                    "experiment": (
-                        {
-                            "summary": parsed.summary,
-                            "metrics": parsed.metrics,
-                            "references": (
-                                [
-                                    {"commit": reference.commit, "why": reference.why}
-                                    for reference in (parsed.references or [])
-                                ]
-                                if parsed.references is not None
-                                else None
-                            ),
-                        }
-                        if parsed
-                        else None
-                    ),
-                },
-                indent=2,
-            )
-        )
-        return
     if journal is not None:
         click.echo(f"# {ROOT_FILES.journal}")
         click.echo(journal.rstrip())

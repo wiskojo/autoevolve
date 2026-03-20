@@ -6,7 +6,6 @@ from typing import Literal
 MetricDirection = Literal["max", "min"]
 MetricValue = bool | int | float | str | None
 SetOutputFormat = Literal["jsonl", "tsv"]
-ObjectOutputFormat = Literal["json", "text"]
 GraphDirection = Literal["backward", "both", "forward"]
 GraphEdges = Literal["all", "git", "references"]
 
