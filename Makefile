@@ -1,29 +1,31 @@
-.PHONY: sync format format-check lint mypy test build check
-
+.PHONY: sync
 sync:
 	uv sync
 
+.PHONY: format
 format:
 	uv run ruff format .
 	uv run ruff check --fix .
 
+.PHONY: format-check
 format-check:
 	uv run ruff format --check .
 
+.PHONY: lint
 lint:
 	uv run ruff check .
 
-mypy:
+.PHONY: typecheck
+typecheck:
 	uv run mypy src
 
+.PHONY: test
 test:
 	uv run pytest -q
 
+.PHONY: build
 build:
 	uv build
 
-check:
-	$(MAKE) format-check
-	$(MAKE) lint
-	$(MAKE) mypy
-	$(MAKE) test
+.PHONY: check
+check: format-check lint typecheck test
