@@ -1,60 +1,29 @@
 # autoevolve
 
-`autoevolve` is a Python port of the JS CLI for git-backed experiment loops with coding agents.
+`autoevolve` lets you use your existing coding agent in a simple git-backed experiment loop.
 
-Supports Python `3.10+`.
+Run it inside an existing project, let it set up the files your coding agent needs, and then let the agent iterate through experiments as git commits.
 
 ## Install
 
 ```bash
-uv sync --no-dev
+pip install autoevolve
 ```
 
-For local development:
+## Quickstart
+
+Initialize `autoevolve` in an existing git repo:
 
 ```bash
-uv sync --group dev
+autoevolve init
 ```
 
-That installs `pytest`, `ruff`, `mypy`, `inline-snapshot`, and `dirty-equals`.
+`autoevolve init` walks you through the setup for your coding harness and problem:
 
-## Run
+- a `SKILL.md` or `PROGRAM.md`: the instructions your coding agent reads to use autoevolve
+- `PROBLEM.md`: the goal, metric, constraints, and validation setup for your problem
 
-```bash
-uv run autoevolve --help
-```
+From there, your agent works in the repo as usual. Experiment commits will include:
 
-Or:
-
-```bash
-uv run python -m autoevolve --help
-```
-
-## Commands
-
-- `init`
-  - Writes a stub `PROBLEM.md` if one does not exist, and preserves an existing `PROBLEM.md`.
-- `validate`
-- `update`
-- `start`
-- `record`
-- `clean`
-- `status`
-- `log`
-- `show`
-- `compare`
-- `lineage`
-- `recent`
-- `best`
-- `pareto`
-
-## Test
-
-```bash
-uv run --group dev pytest -q
-```
-
-```bash
-uv run --group dev ruff check .
-uv run --group dev mypy src
-```
+- `EXPERIMENT.json`: the structured record of the experiment, including summary, metrics, and any references to other experiments
+- `JOURNAL.md`: the narrative record of the experiment, could include the hypothesis, changes made, validation used, outcome, and reflections
