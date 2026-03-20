@@ -8,7 +8,7 @@ from enum import Enum
 from autoevolve.constants import ROOT_FILES
 from autoevolve.errors import AutoevolveError
 
-CONTINUE_HOOK_MESSAGE = "Are you done? If not, continue."
+CONTINUE_HOOK_MESSAGE = "continue"
 SHELL_CONTINUE_HOOK_COMMAND = f"printf '%s\\n' {CONTINUE_HOOK_MESSAGE!r} >&2; exit 2"
 CODEX_CONTINUE_HOOK_COMMAND = (
     "cat >/dev/null; printf '%s\\n' "

@@ -1399,19 +1399,15 @@ def test_continue_hooks() -> None:
     commands = {
         "claude": (
             [".claude/settings.json"],
-            "printf '%s\\n' 'Are you done? If not, continue.' >&2; exit 2",
+            "printf '%s\\n' 'continue' >&2; exit 2",
         ),
         "gemini": (
             [".gemini/settings.json"],
-            "printf '%s\\n' 'Are you done? If not, continue.' >&2; exit 2",
+            "printf '%s\\n' 'continue' >&2; exit 2",
         ),
         "codex": (
             [".codex/config.toml", ".codex/hooks.json"],
-            (
-                "cat >/dev/null; printf '%s\\n' "
-                '\'{"decision":"block","reason":"Are you done? If not, '
-                "continue.\"}'"
-            ),
+            'cat >/dev/null; printf \'%s\\n\' \'{"decision":"block","reason":"continue"}\'',
         ),
     }
     for harness, (paths, expected_command) in commands.items():
