@@ -945,92 +945,80 @@ index <SHA_6>..<SHA_7> 100644
     show = run(["show", "island-a/baseline"], cwd=repo_path)
     assert normalize_text(show.stdout) == snapshot(
         """\
-# JOURNAL.md
-# Island A Baseline
+journal:
+  # Island A Baseline
 
-Hypothesis: Capture the starting benchmark before splitting into island searches.
+  Hypothesis: Capture the starting benchmark before splitting into island searches.
 
-Lineage:
-- git parent: main
+  Lineage:
+  - git parent: main
 
-References:
-- none
+  References:
+  - none
 
-Validation:
-- python3 scripts/validate.py
+  Validation:
+  - python3 scripts/validate.py
 
-Outcome:
-- Recorded the baseline benchmark before island-specific exploration.
+  Outcome:
+  - Recorded the baseline benchmark before island-specific exploration.
 
-# EXPERIMENT.json
-{
-  "summary": "Recorded the baseline benchmark before island-specific exploration.",
-  "metrics": {
-    "benchmark_score": 0.838,
-    "runtime_sec": 0.91
-  },
-  "references": []
-}
+experiment:
+  summary: Recorded the baseline benchmark before island-specific exploration.
+  metrics:
+    benchmark_score: 0.838
+    runtime_sec: 0.91
+  references:
+    (none)
 
-# DIFF
-(none)
+code diff:
+  (none)
 """
     )
 
     show_best = run(["show", "cross/hybrid-final"], cwd=repo_path)
     assert normalize_text(show_best.stdout) == snapshot(
         """\
-# JOURNAL.md
-# Cross Hybrid Final
+journal:
+  # Cross Hybrid Final
 
-Hypothesis: Cross-pollinate the strongest island A, B, and C ideas without doing a formal git merge.
+  Hypothesis: Cross-pollinate the strongest island A, B, and C ideas without doing a formal git merge.
 
-Lineage:
-- git parent: island-a/balanced-v2 @ <SHA_1>
+  Lineage:
+  - git parent: island-a/balanced-v2 @ <SHA_1>
 
-References:
-- <SHA_2>: borrowed the stale-case recovery heuristic idea from this experiment
-- <SHA_3>: borrowed the premium-guard weighting idea from this experiment
+  References:
+  - <SHA_2>: borrowed the stale-case recovery heuristic idea from this experiment
+  - <SHA_3>: borrowed the premium-guard weighting idea from this experiment
 
-Validation:
-- python3 scripts/validate.py
+  Validation:
+  - python3 scripts/validate.py
 
-Outcome:
-- Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+  Outcome:
+  - Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
 
-# EXPERIMENT.json
-{
-  "summary": "Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.",
-  "metrics": {
-    "benchmark_score": 0.918,
-    "runtime_sec": 1.08
-  },
-  "references": [
-    {
-      "commit": "<SHA_4>",
-      "why": "borrowed the stale-case recovery heuristic idea from this experiment"
-    },
-    {
-      "commit": "<SHA_5>",
-      "why": "borrowed the premium-guard weighting idea from this experiment"
-    }
-  ]
-}
+experiment:
+  summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+  metrics:
+    benchmark_score: 0.918
+    runtime_sec: 1.08
+  references:
+    <SHA_2>: borrowed the stale-case recovery heuristic idea from this experiment
+    <SHA_3>: borrowed the premium-guard weighting idea from this experiment
 
-# DIFF
-diff --git a/src/ranker.py b/src/ranker.py
-index <SHA_6>..<SHA_7> 100644
---- a/src/ranker.py
-+++ b/src/ranker.py
-@@ -1,5 +1,5 @@
- def score_candidate(features):
--    freshness = features["freshness"] * 0.36
--    relevance = features["relevance"] * 0.44
--    affordability = (1 - features["cost"]) * 0.2
-+    freshness = features["freshness"] * 0.37
-+    relevance = features["relevance"] * 0.42
-+    affordability = (1 - features["cost"]) * 0.21
-     return round(freshness + relevance + affordability, 3)
+code diff:
+  diff --git a/src/ranker.py b/src/ranker.py
+  index <SHA_4>..<SHA_5> 100644
+  --- a/src/ranker.py
+  +++ b/src/ranker.py
+  @@ -1,5 +1,5 @@
+   def score_candidate(features):
+  -    freshness = features["freshness"] * 0.36
+  -    relevance = features["relevance"] * 0.44
+  -    affordability = (1 - features["cost"]) * 0.2
+  +    freshness = features["freshness"] * 0.37
+  +    relevance = features["relevance"] * 0.42
+  +    affordability = (1 - features["cost"]) * 0.21
+       return round(freshness + relevance + affordability, 3)
 """
     )
 

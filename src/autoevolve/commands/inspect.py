@@ -909,6 +909,28 @@ def print_log_record(record: ExperimentRecord) -> None:
         click.echo(f"  {line}")
 
 
+def format_show_experiment_section(record: ExperimentRecord) -> str:
+    if record.parse_error:
+        return f"invalid: {record.parse_error}"
+    if record.parsed is None:
+        return "(none)"
+
+    lines = [f"summary: {record.parsed.summary or '(none)'}", "metrics:"]
+    if not record.parsed.metrics:
+        lines.append("  (none)")
+    else:
+        for name, value in record.parsed.metrics.items():
+            lines.append(f"  {name}: {json.dumps(value)}")
+
+    lines.append("references:")
+    if not record.parsed.references:
+        lines.append("  (none)")
+    else:
+        for reference in record.parsed.references:
+            lines.append(f"  {short_sha(reference.commit)}: {reference.why}")
+    return "\n".join(lines)
+
+
 def collect_graph(
     repo_root: str,
     records: list[ExperimentRecord],
@@ -1196,14 +1218,6 @@ def run_show(ref: str) -> None:
         raise AutoevolveError(
             f"{ref} does not contain {ROOT_FILES.journal} or {ROOT_FILES.experiment}"
         )
-    if journal is not None:
-        click.echo(f"# {ROOT_FILES.journal}")
-        click.echo(journal.rstrip())
-    if experiment_text is not None:
-        if journal is not None:
-            click.echo("")
-        click.echo(f"# {ROOT_FILES.experiment}")
-        click.echo(experiment_text.rstrip())
     diff_base: str | None = None
     for parent_sha in build_git_parent_map(repo_root, records).get(sha, []):
         diff_base = parent_sha
@@ -1211,10 +1225,21 @@ def run_show(ref: str) -> None:
     if diff_base is None:
         parents = _get_parents(repo_root, sha)
         diff_base = parents[0] if parents else None
-    click.echo("")
-    click.echo("# DIFF")
-    if diff_base is None:
-        click.echo("(none)")
-        return
-    diff_text = run_git(repo_root, ["diff", diff_base, sha, *code_diff_pathspec_args()]).rstrip()
-    click.echo(diff_text or "(none)")
+    diff_text = (
+        None
+        if diff_base is None
+        else run_git(repo_root, ["diff", diff_base, sha, *code_diff_pathspec_args()]).rstrip()
+    )
+
+    sections = [
+        ("journal", journal.rstrip() if journal is not None else None),
+        ("experiment", format_show_experiment_section(record)),
+        ("code diff", diff_text or "(none)"),
+    ]
+    rendered_sections = [(label, content) for label, content in sections if content is not None]
+    for index, (label, content) in enumerate(rendered_sections):
+        click.echo(f"{label}:")
+        for line in content.splitlines():
+            click.echo(f"  {line}" if line else "")
+        if index < len(rendered_sections) - 1:
+            click.echo("")
