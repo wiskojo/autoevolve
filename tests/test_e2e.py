@@ -55,6 +55,10 @@ def normalize_text(text: str, *paths: str | Path, normalize_age: bool = False) -
     return normalized
 
 
+def assert_click_error(stderr: str, message: str) -> None:
+    assert f"Error: {message}" in stderr
+
+
 def run(
     args: list[str],
     *,
@@ -314,11 +318,10 @@ Examples:
   autoevolve best --max benchmark_score --limit 5
 
 Run "autoevolve <command> --help" for command-specific details.
-
 """)
 
     legacy_experiments = run(["experiments"], cwd=repo_path, expect_failure=True)
-    assert 'unknown command "experiments"' in legacy_experiments.stderr
+    assert_click_error(legacy_experiments.stderr, "No such command 'experiments'.")
 
 
 def test_other_scaffold_init() -> None:
@@ -390,7 +393,7 @@ def test_legacy_commands_removed() -> None:
     repo_path = init_repo_from_fixture()
     for command in ["log", "update", "lineage", "results", "search"]:
         result = run([command], cwd=repo_path, expect_failure=True)
-        assert f'unknown command "{command}"' in result.stderr
+        assert_click_error(result.stderr, f"No such command '{command}'.")
 
 
 def test_metric_protocol_validation() -> None:
@@ -594,10 +597,10 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
 """)
 
     bogus_list = run(["list", "--bogus"], cwd=repo_path, expect_failure=True)
-    assert 'Unknown option "--bogus" for list' in bogus_list.stderr
+    assert_click_error(bogus_list.stderr, "No such option: --bogus")
 
     legacy_list_selectors = run(["list", "--text", "premium"], cwd=repo_path, expect_failure=True)
-    assert 'Unknown option "--text" for list' in legacy_list_selectors.stderr
+    assert_click_error(legacy_list_selectors.stderr, "No such option: --text")
 
     recent = run(["recent"], cwd=repo_path)
     assert normalize_text(recent.stdout) == snapshot("""\
@@ -632,10 +635,10 @@ sha	date	subject	tips	metrics	summary
     assert isinstance(recent_json_records[0]["tips"], list)
 
     bogus_recent = run(["recent", "--bogus"], cwd=repo_path, expect_failure=True)
-    assert 'Unknown option "--bogus" for recent' in bogus_recent.stderr
+    assert_click_error(bogus_recent.stderr, "No such option: --bogus")
 
     bogus_best = run(["best", "--bogus"], cwd=repo_path, expect_failure=True)
-    assert 'Unknown option "--bogus" for best' in bogus_best.stderr
+    assert_click_error(bogus_best.stderr, "No such option: --bogus")
 
     default_best = run(["best"], cwd=repo_path)
     best = run(["best", "--max", "benchmark_score"], cwd=repo_path)
@@ -667,7 +670,7 @@ sha	date	subject	tips	metrics	summary
     )
 
     legacy_best_selectors = run(["best", "--active"], cwd=repo_path, expect_failure=True)
-    assert 'Unknown option "--active" for best' in legacy_best_selectors.stderr
+    assert_click_error(legacy_best_selectors.stderr, "No such option: --active")
 
     fastest = run(["best", "--min", "runtime_sec", "--limit", "1"], cwd=repo_path)
     assert normalize_text(fastest.stdout) == snapshot("""\
@@ -732,7 +735,7 @@ sha	date	subject	tips	metrics	summary
         cwd=repo_path,
         expect_failure=True,
     )
-    assert 'Unknown option "--where" for pareto' in legacy_pareto_selectors.stderr
+    assert_click_error(legacy_pareto_selectors.stderr, "No such option: --where")
 
     graph = run(
         [
@@ -1218,7 +1221,7 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
     existing_branch = "autoevolve/existing-branch"
 
     missing_name = run(["start"], cwd=repo_path, env={"HOME": temp_home}, expect_failure=True)
-    assert "start requires an experiment name and summary" in missing_name.stderr
+    assert_click_error(missing_name.stderr, "Missing argument 'NAME'.")
 
     missing_summary = run(
         ["start", "summary-missing"],
@@ -1226,7 +1229,7 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
         env={"HOME": temp_home},
         expect_failure=True,
     )
-    assert "start requires an experiment summary" in missing_summary.stderr
+    assert_click_error(missing_summary.stderr, "Missing argument 'SUMMARY'.")
 
     run_git(repo_path, ["branch", current_seed_branch, "cross/hybrid-final"])
     run_git(repo_path, ["branch", non_experiment_base_branch, original_branch])
