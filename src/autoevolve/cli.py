@@ -15,7 +15,7 @@ from autoevolve.commands.inspect import (
     run_status,
 )
 from autoevolve.commands.lifecycle import run_clean, run_record, run_start
-from autoevolve.constants import MANAGED_WORKTREE_DISPLAY_ROOT
+from autoevolve.constants import MANAGED_WORKTREE_ROOT, format_home_relative_path
 from autoevolve.errors import AutoevolveError
 
 
@@ -151,6 +151,7 @@ Options:
 
 
 def print_start_help() -> None:
+    managed_worktree_root = format_home_relative_path(MANAGED_WORKTREE_ROOT)
     click.echo(
         f"""autoevolve start
 
@@ -163,13 +164,14 @@ Options:
   --from <ref>  Base git ref to branch from. Default: current branch or HEAD.
 
 Notes:
-  start creates a managed worktree under {MANAGED_WORKTREE_DISPLAY_ROOT}.
+  start creates a managed worktree under {managed_worktree_root}.
   Managed branches are created under autoevolve/<name>.
 """
     )
 
 
 def print_record_help() -> None:
+    managed_worktree_root = format_home_relative_path(MANAGED_WORKTREE_ROOT)
     click.echo(
         f"""autoevolve record
 
@@ -181,12 +183,13 @@ Usage:
 Notes:
   record stages all changes, commits with the first line of
   EXPERIMENT.json summary, and removes the current managed worktree.
-  record only works inside managed worktrees under {MANAGED_WORKTREE_DISPLAY_ROOT}.
+  record only works inside managed worktrees under {managed_worktree_root}.
 """
     )
 
 
 def print_clean_help() -> None:
+    managed_worktree_root = format_home_relative_path(MANAGED_WORKTREE_ROOT)
     click.echo(
         f"""autoevolve clean
 
@@ -199,7 +202,7 @@ Options:
   -f, --force  Remove dirty managed worktrees too.
 
 Notes:
-  clean removes managed worktrees under {MANAGED_WORKTREE_DISPLAY_ROOT} for this repository.
+  clean removes managed worktrees under {managed_worktree_root} for this repository.
   With <name>, clean removes the managed worktree for autoevolve/<name>.
   Without <name>, clean removes every managed worktree for this repository.
 """

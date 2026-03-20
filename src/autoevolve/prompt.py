@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autoevolve.constants import MANAGED_WORKTREE_DISPLAY_ROOT, ROOT_FILES
+from autoevolve.constants import MANAGED_WORKTREE_ROOT, ROOT_FILES, format_home_relative_path
 from autoevolve.problem import build_problem_metric_section
 
 
@@ -28,6 +28,7 @@ def build_loop_handoff_prompt() -> str:
 
 
 def build_protocol_body() -> str:
+    managed_worktree_root = format_home_relative_path(MANAGED_WORKTREE_ROOT)
     return "\n".join(
         [
             "# Autoevolve Protocol",
@@ -183,7 +184,7 @@ def build_protocol_body() -> str:
                 "- Keep the filesystem tidy. Put new files, intermediate "
                 "results, and other artifacts in the repository itself, or "
                 "preferably in managed worktrees under "
-                f"`{MANAGED_WORKTREE_DISPLAY_ROOT}`, and clean them up before "
+                f"`{managed_worktree_root}`, and clean them up before "
                 "committing the experiment. Do not scatter files across "
                 "`/tmp`, `/private`, cache directories, your home directory, "
                 "or other ad hoc paths unless the task explicitly requires it. "
@@ -318,7 +319,7 @@ def build_protocol_body() -> str:
             (
                 "- Use `autoevolve clean [<name>] [-f]` to remove stale "
                 "managed worktrees under "
-                f"`{MANAGED_WORKTREE_DISPLAY_ROOT}` for the current repository."
+                f"`{managed_worktree_root}` for the current repository."
             ),
             "- Use `autoevolve list` to inspect prior experiments.",
             (
