@@ -262,7 +262,9 @@ def log_command(limit: int) -> None:
     short_help="Show experiment details.",
     help=(
         "Show experiment details.\n\n"
-        "show prints JOURNAL.md and EXPERIMENT.json for one recorded experiment."
+        "show prints JOURNAL.md, EXPERIMENT.json, and the git diff from the "
+        "previous experiment, or from the first parent commit when there is "
+        "no earlier experiment ancestor."
     ),
 )
 @click.argument("ref")
@@ -277,8 +279,8 @@ def show_command(ref: str) -> None:
     short_help="Compare two experiments.",
     help=(
         "Compare two experiments.\n\n"
-        "compare shows commit metadata, summaries, metrics, lineage relationship, "
-        "and an optional patch."
+        "compare shows commit metadata, summaries, metrics, lineage "
+        "relationship, and the git diff between two recorded experiments."
     ),
 )
 @click.argument("left_ref")

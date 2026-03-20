@@ -458,6 +458,15 @@ def _get_parents(repo_root: str, ref: str) -> list[str]:
     return output.split(" ")[1:]
 
 
+def code_diff_pathspec_args() -> list[str]:
+    return [
+        "--",
+        ".",
+        f":(exclude){ROOT_FILES.experiment}",
+        f":(exclude){ROOT_FILES.journal}",
+    ]
+
+
 def find_git_experiment_ancestor(
     repo_root: str, starting_sha: str, experiment_shas: set[str]
 ) -> str | None:
@@ -573,7 +582,10 @@ def describe_git_relationship(
 
 
 def build_changed_paths(repo_root: str, left_sha: str, right_sha: str) -> list[dict[str, Any]]:
-    output = run_git(repo_root, ["diff", "--name-status", left_sha, right_sha]).strip()
+    output = run_git(
+        repo_root,
+        ["diff", "--name-status", left_sha, right_sha, *code_diff_pathspec_args()],
+    ).strip()
     if not output:
         return []
     changed_paths: list[dict[str, Any]] = []
@@ -1069,8 +1081,13 @@ def run_compare(
         "left": build_parent_metric_delta(left_record, git_parent_map, record_map),
         "right": build_parent_metric_delta(right_record, git_parent_map, record_map),
     }
-    diffstat = run_git(repo_root, ["diff", "--shortstat", left_sha, right_sha]).strip()
-    patch_text = run_git(repo_root, ["diff", left_sha, right_sha]).rstrip() if patch else None
+    diffstat = run_git(
+        repo_root,
+        ["diff", "--shortstat", left_sha, right_sha, *code_diff_pathspec_args()],
+    ).strip()
+    diff_text = run_git(
+        repo_root, ["diff", left_sha, right_sha, *code_diff_pathspec_args()]
+    ).rstrip()
     click.echo(f"left:  {format_experiment_line(left_record)}")
     click.echo(f"right: {format_experiment_line(right_record)}")
     git_details: list[str] = []
@@ -1157,17 +1174,22 @@ def run_compare(
     click.echo("")
     click.echo(f"left summary:  {left_record.parsed.summary if left_record.parsed else '(none)'}")
     click.echo(f"right summary: {right_record.parsed.summary if right_record.parsed else '(none)'}")
-    if patch:
-        click.echo("")
-        click.echo("patch:")
-        if not patch_text:
-            click.echo("  (none)")
-            return
-        click.echo(patch_text)
+    click.echo("")
+    click.echo("patch:" if patch else "code diff:")
+    if not diff_text:
+        click.echo("  (none)")
+        return
+    click.echo(diff_text)
 
 
 def run_show(ref: str) -> None:
     repo_root = find_repo_root(os.getcwd())
+    records = get_experiment_records(repo_root)
+    record_map = {record.sha: record for record in records}
+    sha = resolve_ref(repo_root, ref)
+    record = record_map.get(sha)
+    if record is None:
+        raise AutoevolveError(f"{ref} is not an experiment commit.")
     journal = try_read_file_at_ref(repo_root, ref, ROOT_FILES.journal)
     experiment_text = try_read_file_at_ref(repo_root, ref, ROOT_FILES.experiment)
     if journal is None and experiment_text is None:
@@ -1182,3 +1204,17 @@ def run_show(ref: str) -> None:
             click.echo("")
         click.echo(f"# {ROOT_FILES.experiment}")
         click.echo(experiment_text.rstrip())
+    diff_base: str | None = None
+    for parent_sha in build_git_parent_map(repo_root, records).get(sha, []):
+        diff_base = parent_sha
+        break
+    if diff_base is None:
+        parents = _get_parents(repo_root, sha)
+        diff_base = parents[0] if parents else None
+    click.echo("")
+    click.echo("# DIFF")
+    if diff_base is None:
+        click.echo("(none)")
+        return
+    diff_text = run_git(repo_root, ["diff", diff_base, sha, *code_diff_pathspec_args()]).rstrip()
+    click.echo(diff_text or "(none)")

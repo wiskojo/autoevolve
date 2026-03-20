@@ -849,11 +849,9 @@ tip branches missing experiment records:
 left:  <SHA_1>  2026-01-01T12:10:00+00:00  Record island-a/balanced-v2 experiment [island-a/balanced-v2] - benchmark_score=0.913, runtime_sec=1.03 | Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
 right: <SHA_2>  2026-01-01T12:11:00+00:00  Record cross/hybrid-final experiment [cross/hybrid-final] - benchmark_score=0.918, runtime_sec=1.08 | Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
 git:   direct_parent_of_right (merge-base <SHA_1>)
-diff:  3 files changed, 17 insertions(+), 12 deletions(-)
+diff:  1 file changed, 3 insertions(+), 3 deletions(-)
 
 changed paths:
-  M  EXPERIMENT.json
-  M  JOURNAL.md
   M  src/ranker.py
 
 metrics:
@@ -875,6 +873,21 @@ parent deltas:
 
 left summary:  Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
 right summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+
+code diff:
+diff --git a/src/ranker.py b/src/ranker.py
+index <SHA_6>..<SHA_7> 100644
+--- a/src/ranker.py
++++ b/src/ranker.py
+@@ -1,5 +1,5 @@
+ def score_candidate(features):
+-    freshness = features["freshness"] * 0.36
+-    relevance = features["relevance"] * 0.44
+-    affordability = (1 - features["cost"]) * 0.2
++    freshness = features["freshness"] * 0.37
++    relevance = features["relevance"] * 0.42
++    affordability = (1 - features["cost"]) * 0.21
+     return round(freshness + relevance + affordability, 3)
 """
     )
 
@@ -883,9 +896,7 @@ right summary: Hybrid final is the best synthetic experiment and explicitly comb
         cwd=repo_path,
     )
     assert "\npatch:\n" in compare_patch.stdout
-    assert re.search(
-        r"^diff --git a/EXPERIMENT\.json b/EXPERIMENT\.json", compare_patch.stdout, re.M
-    )
+    assert re.search(r"^diff --git a/src/ranker\.py b/src/ranker\.py", compare_patch.stdout, re.M)
 
     sibling_compare = run(
         [
@@ -960,6 +971,9 @@ Outcome:
   },
   "references": []
 }
+
+# DIFF
+(none)
 """
     )
 
@@ -1002,6 +1016,21 @@ Outcome:
     }
   ]
 }
+
+# DIFF
+diff --git a/src/ranker.py b/src/ranker.py
+index <SHA_6>..<SHA_7> 100644
+--- a/src/ranker.py
++++ b/src/ranker.py
+@@ -1,5 +1,5 @@
+ def score_candidate(features):
+-    freshness = features["freshness"] * 0.36
+-    relevance = features["relevance"] * 0.44
+-    affordability = (1 - features["cost"]) * 0.2
++    freshness = features["freshness"] * 0.37
++    relevance = features["relevance"] * 0.42
++    affordability = (1 - features["cost"]) * 0.21
+     return round(freshness + relevance + affordability, 3)
 """
     )
 
