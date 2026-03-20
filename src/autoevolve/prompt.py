@@ -77,8 +77,8 @@ def build_protocol_body() -> str:
                 "inspect prior experiments, compare outcomes, identify "
                 "promising branches to build on, and reason about the search "
                 "as a whole. Use commands like `autoevolve status`, "
-                "`autoevolve list`, `autoevolve best`, `autoevolve pareto`, "
-                "`autoevolve compare`, and `autoevolve graph`, and anything "
+                "`autoevolve log`, `autoevolve best`, `autoevolve pareto`, "
+                "`autoevolve compare`, and `autoevolve lineage`, and anything "
                 "else you have access to, to understand what has been tried "
                 "and to reflect on where to branch next."
             ),
@@ -314,14 +314,14 @@ def build_protocol_body() -> str:
                 "managed worktrees under "
                 f"`{managed_worktree_root}` for the current repository."
             ),
-            "- Use `autoevolve list` to inspect prior experiments.",
+            "- Use `autoevolve log` to inspect prior experiments.",
             (
                 "- Use `autoevolve recent`, `autoevolve best --max <metric>`, "
                 "or `autoevolve pareto --max <metric> --min <metric>` to find "
                 "strong candidates to build on."
             ),
             (
-                "- Use `autoevolve compare <a> <b>` or `autoevolve graph <ref>` "
+                "- Use `autoevolve compare <a> <b>` or `autoevolve lineage <ref>` "
                 "when you need to understand how experiments differ or connect."
             ),
             "- If you need the full command surface, use `autoevolve --help`.",

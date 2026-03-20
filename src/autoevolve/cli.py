@@ -10,8 +10,8 @@ from autoevolve.commands.analytics import run_best, run_pareto, run_recent
 from autoevolve.commands.human import run_init, run_validate
 from autoevolve.commands.inspect import (
     run_compare,
-    run_graph,
-    run_list,
+    run_lineage,
+    run_log,
     run_show,
     run_status,
 )
@@ -32,10 +32,9 @@ from autoevolve.models import (
 )
 
 TOP_LEVEL_EXAMPLES = (
-    "autoevolve init",
     'autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844',
     "autoevolve record",
-    "autoevolve list",
+    "autoevolve log",
     "autoevolve recent --limit 5",
     "autoevolve best --max benchmark_score --limit 5",
 )
@@ -222,8 +221,8 @@ def clean_command(name: str | None, force: bool) -> None:
     "status",
     cls=SectionedCommand,
     section="Inspect",
-    short_help="Show the current experiment snapshot.",
-    help="Show the current experiment snapshot.",
+    short_help="Show the current experiment status.",
+    help="Show the current experiment status.",
 )
 @click.option("--format", "output_format", type=click.Choice(("text", "json")), default="text")
 def status_command(output_format: str) -> None:
@@ -231,23 +230,23 @@ def status_command(output_format: str) -> None:
 
 
 @cli.command(
-    "list",
+    "log",
     cls=SectionedCommand,
     section="Inspect",
-    short_help="List recent experiments.",
-    help="List recent experiments in a compact human-readable log.",
+    short_help="Show experiment logs.",
+    help="Show recent experiment logs with full metrics and JOURNAL.md content.",
 )
 @click.option("--limit", type=click.IntRange(min=1), default=10, show_default=True)
-def list_command(limit: int) -> None:
-    run_list(limit)
+def log_command(limit: int) -> None:
+    run_log(limit)
 
 
 @cli.command(
     "show",
     cls=SectionedCommand,
     section="Inspect",
-    short_help="Show JOURNAL.md and EXPERIMENT.json for one ref.",
-    help="Show JOURNAL.md and EXPERIMENT.json for one ref.",
+    short_help="Show experiment details.",
+    help="Show experiment details.",
 )
 @click.argument("ref")
 @click.option("--format", "output_format", type=click.Choice(("text", "json")), default="text")
@@ -259,8 +258,8 @@ def show_command(ref: str, output_format: str) -> None:
     "compare",
     cls=SectionedCommand,
     section="Inspect",
-    short_help="Compare two experiment commits.",
-    help="Compare two experiment commits.",
+    short_help="Compare two experiments.",
+    help="Compare two experiments.",
 )
 @click.argument("left_ref")
 @click.argument("right_ref")
@@ -271,11 +270,11 @@ def compare_command(left_ref: str, right_ref: str, output_format: str, patch: bo
 
 
 @cli.command(
-    "graph",
+    "lineage",
     cls=SectionedCommand,
     section="Inspect",
-    short_help="Traverse lineage around one ref.",
-    help="Traverse lineage around one ref.",
+    short_help="Traverse experiment lineage.",
+    help="Traverse experiment lineage.",
 )
 @click.argument("ref")
 @click.option(
@@ -292,14 +291,14 @@ def compare_command(left_ref: str, right_ref: str, output_format: str, patch: bo
 )
 @click.option("--depth", type=DEPTH, default="3", show_default=True)
 @click.option("--format", "output_format", type=click.Choice(("text", "json")), default="text")
-def graph_command(
+def lineage_command(
     ref: str,
     edges: str,
     direction: str,
     depth: int | None,
     output_format: str,
 ) -> None:
-    run_graph(
+    run_lineage(
         ref=ref,
         edges=cast(GraphEdges, edges),
         direction=cast(GraphDirection, direction),
@@ -331,10 +330,10 @@ def recent_command(limit: int, output_format: str) -> None:
     "best",
     cls=SectionedCommand,
     section="Analytics",
-    short_help="Return the top experiments for one objective.",
+    short_help="Return the top experiments for one metric.",
     help=(
-        "Return the top experiments for one objective.\n\n"
-        "If no objective is provided, best defaults to the primary metric from PROBLEM.md."
+        "Return the top experiments for one metric.\n\n"
+        "If no metric is provided, best defaults to the primary metric from PROBLEM.md."
     ),
 )
 @click.option("--max", "max_metric", help="Metric to maximize.")
@@ -367,8 +366,8 @@ def best_command(
     "pareto",
     cls=SectionedCommand,
     section="Analytics",
-    short_help="Return the Pareto frontier for the selected objectives.",
-    help="Return the Pareto frontier for the selected objectives.",
+    short_help="Return the Pareto frontier for the selected metrics.",
+    help="Return the Pareto frontier for the selected metrics.",
 )
 @click.option("--max", "max_metrics", multiple=True, help="Metric to maximize. Repeat as needed.")
 @click.option("--min", "min_metrics", multiple=True, help="Metric to minimize. Repeat as needed.")
@@ -390,7 +389,7 @@ def pareto_command(
     objectives.extend(Objective(direction="min", metric=metric) for metric in min_metrics)
     if not objectives:
         raise click.UsageError(
-            "pareto requires at least one objective, for example: --max primary_metric --min runtime_sec"
+            "pareto requires at least one metric, for example: --max primary_metric --min runtime_sec"
         )
     run_pareto(objectives, limit, cast(SetOutputFormat, output_format))
 

@@ -286,22 +286,21 @@ Lifecycle:
   clean   Remove stale managed worktrees for this repository.
 
 Inspect:
-  status   Show the current experiment snapshot.
-  list     List recent experiments.
-  show     Show JOURNAL.md and EXPERIMENT.json for one ref.
-  compare  Compare two experiment commits.
-  graph    Traverse lineage around one ref.
+  status   Show the current experiment status.
+  log      Show experiment logs.
+  show     Show experiment details.
+  compare  Compare two experiments.
+  lineage  Traverse experiment lineage.
 
 Analytics:
   recent  Return the most recent experiments.
-  best    Return the top experiments for one objective.
-  pareto  Return the Pareto frontier for the selected objectives.
+  best    Return the top experiments for one metric.
+  pareto  Return the Pareto frontier for the selected metrics.
 
 Examples:
-  autoevolve init
   autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844
   autoevolve record
-  autoevolve list
+  autoevolve log
   autoevolve recent --limit 5
   autoevolve best --max benchmark_score --limit 5
 
@@ -386,7 +385,7 @@ For example:
 
 def test_legacy_commands_removed() -> None:
     repo_path = init_repo_from_fixture()
-    for command in ["log", "update", "lineage", "results", "search"]:
+    for command in ["graph", "list", "update", "results", "search"]:
         result = run([command], cwd=repo_path, expect_failure=True)
         assert_click_error(result.stderr, f"No such command '{command}'.")
 
@@ -480,6 +479,8 @@ def test_removed_init_problem_options() -> None:
 
 def test_protocol_prompt_lifecycle_guidance() -> None:
     prompt = build_protocol_body()
+    assert "autoevolve log" in prompt
+    assert "autoevolve lineage" in prompt
     assert "autoevolve start <name> <summary> [--from <ref>]" in prompt
     assert "autoevolve record" in prompt
     assert "autoevolve clean" in prompt
@@ -494,81 +495,66 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
     commit_all(repo_path, "Initialize autoevolve")
     main_branch = current_branch(repo_path)
     commit_by_branch = populate_synthetic_branches(repo_path)
-    experiment_list = run(["list"], cwd=repo_path)
-    assert normalize_text(experiment_list.stdout) == snapshot(
+    experiment_log = run(["log"], cwd=repo_path)
+    normalized_log = normalize_text(experiment_log.stdout)
+    assert normalized_log.startswith("commit <SHA_1>\n")
+    assert normalized_log.count("\ncommit ") == 9
+    assert "Journal:\n  # Cross Hybrid Final\n" in normalized_log
+    assert "Subject: Record island-c/clip-premium experiment\n" in normalized_log
+
+    limited_log = run(["log", "--limit", "2"], cwd=repo_path)
+    assert normalize_text(limited_log.stdout) == snapshot(
         """\
-<SHA_1>  2026-01-01T12:11:00+00:00  Record cross/hybrid-final experiment
-  summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
-  metrics: benchmark_score=0.918, runtime_sec=1.08
-  journal: Hypothesis: Cross-pollinate the strongest island A, B, and C ideas without doing a formal git merge.
+commit <SHA_1>
+Date:    2026-01-01T12:11:00+00:00
+Tips:    cross/hybrid-final
+Subject: Record cross/hybrid-final experiment
+Summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+Metrics:
+  benchmark_score: 0.918
+  runtime_sec: 1.08
 
-<SHA_2>  2026-01-01T12:10:00+00:00  Record island-a/balanced-v2 experiment
-  summary: Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
-  metrics: benchmark_score=0.913, runtime_sec=1.03
-  journal: Hypothesis: Preserve the cost gains from island A while borrowing island C's premium guard.
+Journal:
+  # Cross Hybrid Final
+  Hypothesis: Cross-pollinate the strongest island A, B, and C ideas without doing a formal git merge.
+  Lineage:
+  - git parent: island-a/balanced-v2 @ <SHA_2>
+  References:
+  - <SHA_3>: borrowed the stale-case recovery heuristic idea from this experiment
+  - <SHA_4>: borrowed the premium-guard weighting idea from this experiment
+  Validation:
+  - python3 scripts/validate.py
+  Outcome:
+  - Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
 
-<SHA_3>  2026-01-01T12:09:00+00:00  Record island-c/overfit-premium experiment
-  summary: The premium-heavy mix regressed against the earlier baselines despite being very fast to validate.
-  metrics: benchmark_score=0.821, runtime_sec=0.74
-  journal: Hypothesis: Try an aggressive premium-heavy setting even if it risks overfitting the benchmark.
+commit <SHA_5>
+Date:    2026-01-01T12:10:00+00:00
+Tips:    island-a/balanced-v2
+Subject: Record island-a/balanced-v2 experiment
+Summary: Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+Metrics:
+  benchmark_score: 0.913
+  runtime_sec: 1.03
 
-<SHA_4>  2026-01-01T12:08:00+00:00  Record island-a/cost-penalty experiment
-  summary: The stronger cost penalty crossed the 0.90 threshold but made validation slower.
-  metrics: benchmark_score=0.901, runtime_sec=1.12
-  journal: Hypothesis: Increase the cost penalty on island A while keeping island B's stale recovery in mind.
-
-<SHA_5>  2026-01-01T12:07:00+00:00  Record island-c/premium-guard experiment
-  summary: Premium guard was solid and balanced relevance against cheaper-case pressure.
-  metrics: benchmark_score=0.894, runtime_sec=0.92
-  journal: Hypothesis: Pull island C back from over-indexing on relevance while borrowing island A's cheaper-case signal.
-
-<SHA_6>  2026-01-01T12:06:00+00:00  Record island-a/cheap-priority experiment
-  summary: Prioritizing cheaper items improved the cheap-case fit without fully giving up stale recovery.
-  metrics: benchmark_score=0.887, runtime_sec=1.04
-  journal: Hypothesis: Push affordability further on island A while checking it against the stale-recovery branch.
-
-<SHA_7>  2026-01-01T12:05:00+00:00  Record island-c/relevance-lean experiment
-  summary: A relevance-heavy mix helped somewhat and became the fastest branch to validate.
-  metrics: benchmark_score=0.861, runtime_sec=0.8
-  journal: Hypothesis: Lean harder on relevance while keeping a reference to island B's freshness behavior.
-
-<SHA_8>  2026-01-01T12:04:00+00:00  Record island-b/stale-recovery experiment
-  summary: Stale recovery helped and picked up some of the cheap-case gains from island A.
-  metrics: benchmark_score=0.879, runtime_sec=0.96
-  journal: Hypothesis: Keep the freshness-heavy island but borrow the affordability intuition from island A.
-
-<SHA_9>  2026-01-01T12:03:00+00:00  Record island-a/rebalance-weights experiment
-  summary: Weight rebalance improved the benchmark noticeably at a small runtime cost.
-  metrics: benchmark_score=0.872, runtime_sec=1.01
-  journal: Hypothesis: Rebalance toward affordability on island A after the baseline split.
-
-<SHA_10>  2026-01-01T12:02:00+00:00  Record island-c/clip-premium experiment
-  summary: Premium clipping was only a minor improvement over baseline but stayed cheap to validate.
-  metrics: benchmark_score=0.842, runtime_sec=0.86
-  journal: Hypothesis: Reduce the freshness term on a third island to avoid overshooting premium examples.
+Journal:
+  # Island A Balanced v2
+  Hypothesis: Preserve the cost gains from island A while borrowing island C's premium guard.
+  Lineage:
+  - git parent: island-a/cost-penalty @ <SHA_6>
+  References:
+  - <SHA_4>: borrowed the premium-guard idea from this experiment
+  Validation:
+  - python3 scripts/validate.py
+  Outcome:
+  - Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
 """
     )
 
-    limited_list = run(["list", "--limit", "2"], cwd=repo_path)
-    assert normalize_text(limited_list.stdout) == snapshot(
-        """\
-<SHA_1>  2026-01-01T12:11:00+00:00  Record cross/hybrid-final experiment
-  summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
-  metrics: benchmark_score=0.918, runtime_sec=1.08
-  journal: Hypothesis: Cross-pollinate the strongest island A, B, and C ideas without doing a formal git merge.
+    bogus_log = run(["log", "--bogus"], cwd=repo_path, expect_failure=True)
+    assert_click_error(bogus_log.stderr, "No such option: --bogus")
 
-<SHA_2>  2026-01-01T12:10:00+00:00  Record island-a/balanced-v2 experiment
-  summary: Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
-  metrics: benchmark_score=0.913, runtime_sec=1.03
-  journal: Hypothesis: Preserve the cost gains from island A while borrowing island C's premium guard.
-"""
-    )
-
-    bogus_list = run(["list", "--bogus"], cwd=repo_path, expect_failure=True)
-    assert_click_error(bogus_list.stderr, "No such option: --bogus")
-
-    legacy_list_selectors = run(["list", "--text", "premium"], cwd=repo_path, expect_failure=True)
-    assert_click_error(legacy_list_selectors.stderr, "No such option: --text")
+    legacy_log_selectors = run(["log", "--text", "premium"], cwd=repo_path, expect_failure=True)
+    assert_click_error(legacy_log_selectors.stderr, "No such option: --text")
 
     recent = run(["recent"], cwd=repo_path)
     assert normalize_text(recent.stdout) == snapshot(
@@ -713,9 +699,9 @@ sha	date	subject	tips	metrics	summary
     )
     assert_click_error(legacy_pareto_selectors.stderr, "No such option: --where")
 
-    graph = run(
+    lineage = run(
         [
-            "graph",
+            "lineage",
             "cross/hybrid-final",
             "--edges",
             "all",
@@ -726,7 +712,7 @@ sha	date	subject	tips	metrics	summary
         ],
         cwd=repo_path,
     )
-    assert normalize_text(graph.stdout) == snapshot(
+    assert normalize_text(lineage.stdout) == snapshot(
         """\
 root: <SHA_1>  Record cross/hybrid-final experiment
 mode: edges=all direction=backward depth=all
@@ -766,9 +752,9 @@ edges:
 """
     )
 
-    graph_json = run(
+    lineage_json = run(
         [
-            "graph",
+            "lineage",
             "cross/hybrid-final",
             "--edges",
             "all",
@@ -781,19 +767,19 @@ edges:
         ],
         cwd=repo_path,
     )
-    graph_record = json.loads(graph_json.stdout)
-    assert graph_record["root"] == commit_by_branch["cross/hybrid-final"]
+    lineage_record = json.loads(lineage_json.stdout)
+    assert lineage_record["root"] == commit_by_branch["cross/hybrid-final"]
     assert any(
         edge["kind"] == "git" and edge["to"] == commit_by_branch["island-a/balanced-v2"]
-        for edge in graph_record["edges"]
+        for edge in lineage_record["edges"]
     )
     assert any(
         edge["kind"] == "reference" and edge["to"] == commit_by_branch["island-c/premium-guard"]
-        for edge in graph_record["edges"]
+        for edge in lineage_record["edges"]
     )
-    references_only_graph = run(
+    references_only_lineage = run(
         [
-            "graph",
+            "lineage",
             "cross/hybrid-final",
             "--edges",
             "references",
@@ -806,7 +792,7 @@ edges:
         ],
         cwd=repo_path,
     )
-    references_only_record = json.loads(references_only_graph.stdout)
+    references_only_record = json.loads(references_only_lineage.stdout)
     assert references_only_record["mode"] == "references"
     assert references_only_record["edges"]
     assert all(edge["kind"] == "reference" for edge in references_only_record["edges"])
@@ -815,8 +801,8 @@ edges:
         for edge in references_only_record["edges"]
     )
 
-    default_graph = run(["graph", "cross/hybrid-final"], cwd=repo_path)
-    assert normalize_text(default_graph.stdout) == snapshot(
+    default_lineage = run(["lineage", "cross/hybrid-final"], cwd=repo_path)
+    assert normalize_text(default_lineage.stdout) == snapshot(
         """\
 root: <SHA_1>  Record cross/hybrid-final experiment
 mode: edges=all direction=backward depth=3

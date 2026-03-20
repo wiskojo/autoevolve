@@ -39,10 +39,10 @@ uv run python -m autoevolve --help
 - `record`
 - `clean`
 - `status`
-- `list`
+- `log`
 - `show`
 - `compare`
-- `graph`
+- `lineage`
 - `recent`
 - `best`
 - `pareto`

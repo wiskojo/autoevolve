@@ -42,7 +42,6 @@ from autoevolve.models import (
 )
 from autoevolve.problem import parse_problem_primary_metric
 from autoevolve.utils import (
-    extract_excerpt,
     file_exists,
     format_metric_pairs,
     format_metric_summary,
@@ -855,7 +854,7 @@ def print_status_output(status: dict[str, Any]) -> None:
         click.echo("")
 
 
-def print_list_record(record: ExperimentRecord) -> None:
+def print_log_record(record: ExperimentRecord) -> None:
     summary = (
         f"invalid EXPERIMENT.json: {record.parse_error}"
         if record.parse_error
@@ -868,11 +867,25 @@ def print_list_record(record: ExperimentRecord) -> None:
         if record.parse_error
         else format_metric_pairs(record.parsed.metrics if record.parsed else None) or "(none)"
     )
-    journal_excerpt = extract_excerpt(record.journal_text) or "(none)"
-    click.echo(f"{short_sha(record.sha)}  {record.date}  {record.subject}")
-    click.echo(f"  summary: {summary}")
-    click.echo(f"  metrics: {metrics}")
-    click.echo(f"  journal: {journal_excerpt}")
+    journal_text = record.journal_text.strip() or "(none)"
+    click.echo(f"commit {record.sha}")
+    click.echo(f"Date:    {record.date}")
+    if record.tip_branches:
+        click.echo(f"Tips:    {', '.join(record.tip_branches)}")
+    click.echo(f"Subject: {record.subject}")
+    click.echo(f"Summary: {summary}")
+    click.echo("Metrics:")
+    if record.parse_error or metrics == "(none)":
+        click.echo(f"  {metrics}")
+    else:
+        for name, value in (record.parsed.metrics or {}).items() if record.parsed else ():
+            click.echo(f"  {name}: {json.dumps(value)}")
+    click.echo("")
+    click.echo("Journal:")
+    for line in journal_text.splitlines():
+        if not line:
+            continue
+        click.echo(f"  {line}")
 
 
 def collect_graph(
@@ -966,7 +979,7 @@ def run_status(output_format: ObjectOutputFormat = "text") -> None:
     print_status_output(status)
 
 
-def run_list(limit: int = 10) -> None:
+def run_log(limit: int = 10) -> None:
     repo_root = find_repo_root(os.getcwd())
     records = apply_limit(
         sorted(
@@ -982,10 +995,10 @@ def run_list(limit: int = 10) -> None:
     for index, record in enumerate(records):
         if index > 0:
             click.echo("")
-        print_list_record(record)
+        print_log_record(record)
 
 
-def run_graph(
+def run_lineage(
     ref: str,
     edges: GraphEdges = "all",
     direction: GraphDirection = "backward",
