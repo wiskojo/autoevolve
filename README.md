@@ -7,16 +7,16 @@ Supports Python `3.10+`.
 ## Install
 
 ```bash
-uv sync
+uv sync --no-dev
 ```
 
-For test tooling:
+For local development:
 
 ```bash
-uv sync --extra dev
+uv sync --group dev
 ```
 
-That installs `pytest`, `ruff`, and `mypy`.
+That installs `pytest`, `ruff`, `mypy`, `inline-snapshot`, and `dirty-equals`.
 
 ## Run
 
@@ -49,10 +49,10 @@ uv run python -m autoevolve help
 ## Test
 
 ```bash
-uv run --extra dev pytest -q
+uv run --group dev pytest -q
 ```
 
 ```bash
-uv run --extra dev ruff check .
-uv run --extra dev mypy src
+uv run --group dev ruff check .
+uv run --group dev mypy src
 ```

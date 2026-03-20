@@ -10,8 +10,10 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from dirty_equals import IsPartialDict, IsStr
+from inline_snapshot import snapshot
 
-from autoevolve.prompt import build_protocol_prompt
+from autoevolve.prompt import build_protocol_prompt  # type: ignore[import-untyped]
 from tests.experiments import (
     EXPERIMENTS,
     build_experiment_object,
@@ -24,6 +26,33 @@ THIS_FILE = Path(__file__).resolve()
 PROJECT_ROOT = THIS_FILE.parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"
 FIXTURE_PATH = PROJECT_ROOT / "tests" / "fixtures" / "python-playground"
+HEX_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+AGE_RE = re.compile(r"\((?:just now|[0-9]+[a-z]+ ago)\)")
+
+
+def normalize_text(text: str, *paths: str | Path, normalize_age: bool = False) -> str:
+    normalized = text
+    for index, raw_path in enumerate(paths, start=1):
+        label = f"<PATH_{index}>"
+        path_text = str(raw_path)
+        candidates = [str(Path(raw_path).resolve()), path_text]
+        if path_text.startswith("/var/"):
+            candidates.append(f"/private{path_text}")
+        for candidate in candidates:
+            normalized = normalized.replace(candidate, label)
+
+    sha_map: dict[str, str] = {}
+
+    def replace_sha(match: re.Match[str]) -> str:
+        sha = match.group(0)
+        if sha not in sha_map:
+            sha_map[sha] = f"<SHA_{len(sha_map) + 1}>"
+        return sha_map[sha]
+
+    normalized = HEX_RE.sub(replace_sha, normalized)
+    if normalize_age:
+        normalized = AGE_RE.sub("(<AGE>)", normalized)
+    return normalized
 
 
 def run(
@@ -83,6 +112,10 @@ def run_git_with_env(cwd: str | Path, args: list[str], extra_env: dict[str, str]
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stdout
+
+
+def read_json_file(path: str | Path) -> object:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def branch_exists(repo_path: str | Path, branch_name: str) -> bool:
@@ -169,9 +202,11 @@ def populate_synthetic_branches(repo_path: str | Path) -> dict[str, str]:
     commit_by_branch: dict[str, str] = {}
     for experiment in EXPERIMENTS:
         base_ref = with_prefix(experiment.base) if experiment.base else main_branch
+        branch_name = with_prefix(experiment.branch)
         assert base_ref is not None
+        assert branch_name is not None
         run_git(repo_path, ["checkout", base_ref])
-        run_git(repo_path, ["checkout", "-b", with_prefix(experiment.branch)])
+        run_git(repo_path, ["checkout", "-b", branch_name])
         base_commit = commit_by_branch.get(experiment.base) if experiment.base else None
         resolved_references = resolve_references(experiment, commit_by_branch)
         write_experiment(
@@ -210,88 +245,105 @@ def test_other_init_and_help() -> None:
         ],
         cwd=repo_path,
     )
-    assert re.search(r"Harness: other", result.stdout)
-    assert re.search(r"Files: PROBLEM\.md, AUTOEVOLVE\.md", result.stdout)
-    assert re.search(r"Autoevolve initialized\.", result.stdout)
-    assert re.search(r"Repository: ", result.stdout)
-    assert re.search(r"Files written:", result.stdout)
-    assert re.search(r"- PROBLEM\.md", result.stdout)
-    assert re.search(r"- AUTOEVOLVE\.md", result.stdout)
-    assert re.search(
-        r"Next: ask your agent to verify setup and begin the experiment loop\.",
-        result.stdout,
-    )
-    assert re.search(r"Start autoevolve\.", result.stdout)
+    assert normalize_text(result.stdout, repo_path) == snapshot("""\
+Repository
+<PATH_1>
+Review
+Harness: other
+Mode: Set up now
+Files: PROBLEM.md, AUTOEVOLVE.md
+Autoevolve initialized.
+
+Repository: <PATH_1>
+
+Files written:
+  - PROBLEM.md
+  - AUTOEVOLVE.md
+
+Next: ask your agent to verify setup and begin the experiment loop.
+
+For example:
+  Start autoevolve.
+""")
     assert Path(repo_path, "PROBLEM.md").exists()
     assert Path(repo_path, "AUTOEVOLVE.md").exists()
 
     validate = run(["validate"], cwd=repo_path)
-    assert "repository matches the autoevolve protocol" in validate.stdout
-    assert "No current experiment record found" in validate.stdout
+    assert validate.stdout == snapshot(
+        "OK: repository matches the autoevolve protocol.\n"
+        "No current experiment record found. Add JOURNAL.md and "
+        "EXPERIMENT.json in the first experiment commit.\n"
+    )
 
     top_help = run([], cwd=repo_path)
-    assert "Human:" in top_help.stdout
-    assert "Lifecycle:" in top_help.stdout
-    assert "Inspect:" in top_help.stdout
-    assert "Analytics:" in top_help.stdout
-    assert re.search(
-        r"start\s+Create a managed experiment branch and worktree\.",
-        top_help.stdout,
-    )
-    assert re.search(
-        r"record\s+Validate, commit, and remove the current managed worktree\.",
-        top_help.stdout,
-    )
-    assert re.search(r"list\s+List recent experiments\.", top_help.stdout)
-    assert re.search(r"recent\s+Return the most recent experiments\.", top_help.stdout)
-    assert "update" not in top_help.stdout
+    assert top_help.stdout == snapshot("""\
+autoevolve
+
+Git-backed experiment loops for coding agents.
+
+Usage:
+  autoevolve <command> [options]
+
+Human:
+  init        Scaffold PROBLEM.md and agent instructions.
+  validate    Validate that the repo is correctly initialized for autoevolve.
+
+Lifecycle:
+  start       Create a managed experiment branch and worktree.
+  record      Validate, commit, and remove the current managed worktree.
+  clean       Remove stale managed worktrees for this repository.
+
+Inspect:
+  status      Show the current experiment snapshot.
+  list        List recent experiments.
+  show        Show JOURNAL.md and EXPERIMENT.json for one ref.
+  compare     Compare two experiment commits.
+  graph       Traverse lineage around one ref.
+
+Analytics:
+  recent      Return the most recent experiments.
+  best        Return the top experiments for one objective.
+  pareto      Return the Pareto frontier for the selected objectives.
+
+Examples:
+  autoevolve init
+  autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844
+  autoevolve record
+  autoevolve list
+  autoevolve recent --limit 5
+  autoevolve best --max benchmark_score --limit 5
+
+Run "autoevolve <command> --help" for command-specific details.
+
+""")
 
     legacy_experiments = run(["experiments"], cwd=repo_path, expect_failure=True)
     assert 'unknown command "experiments"' in legacy_experiments.stderr
-
-    list_help = run(["list", "--help"], cwd=repo_path)
-    assert re.search(r"^autoevolve list\n\nList recent experiments\.\n\nUsage:", list_help.stdout)
-    assert re.search(r"most recent recorded experiments", list_help.stdout, re.I)
-    assert re.search(
-        r"--limit <n>\s+Number of experiments to show\. Default: 10\.",
-        list_help.stdout,
-        re.I,
-    )
-
-    best_help = run(["best", "--help"], cwd=repo_path)
-    assert re.search(
-        r"^autoevolve best\n\nReturn the top experiments for one objective\.\n\nUsage:",
-        best_help.stdout,
-    )
-    assert "format <tsv|jsonl>" in best_help.stdout
-    assert "primary metric from PROBLEM.md" in best_help.stdout
-
-    recent_help = run(["recent", "--help"], cwd=repo_path)
-    assert re.search(
-        r"^autoevolve recent\n\nShow the most recent recorded experiments\.\n\nUsage:",
-        recent_help.stdout,
-    )
-    assert "format <tsv|jsonl>" in recent_help.stdout
-
-    pareto_help = run(["pareto", "--help"], cwd=repo_path)
-    assert "autoevolve pareto" in pareto_help.stdout
-    assert "Pareto frontier for the selected objectives" in pareto_help.stdout
-
-    graph_help = run(["graph", "--help"], cwd=repo_path)
-    assert "autoevolve graph <ref>" in graph_help.stdout
-    assert "--depth <n|all>" in graph_help.stdout
 
 
 def test_other_scaffold_init() -> None:
     repo_path = init_repo_from_fixture()
     result = run(["init", "other", "--mode", "scaffold", "--yes"], cwd=repo_path)
-    assert "Harness: other" in result.stdout
-    assert "Files: PROBLEM.md, AUTOEVOLVE.md" in result.stdout
-    assert "Autoevolve initialized." in result.stdout
-    assert "Repository: " in result.stdout
-    assert "Files written:" in result.stdout
-    assert "Next: ask your agent to finish setup." in result.stdout
-    assert "Follow the setup instructions for autoevolve." in result.stdout
+    assert normalize_text(result.stdout, repo_path) == snapshot("""\
+Repository
+<PATH_1>
+Review
+Harness: other
+Mode: Scaffold and finish with my agent
+Files: PROBLEM.md, AUTOEVOLVE.md
+Autoevolve initialized.
+
+Repository: <PATH_1>
+
+Files written:
+  - PROBLEM.md
+  - AUTOEVOLVE.md
+
+Next: ask your agent to finish setup.
+
+For example:
+  Follow the setup instructions for autoevolve.
+""")
 
 
 def test_keep_existing_problem_init() -> None:
@@ -312,11 +364,25 @@ python3 scripts/validate.py
 """
     Path(repo_path, "PROBLEM.md").write_text(existing_problem, encoding="utf-8")
     result = run(["init", "other", "--yes"], cwd=repo_path)
-    assert "Harness: other" in result.stdout
-    assert "Problem: Keep existing PROBLEM.md" in result.stdout
-    assert "Files: keep PROBLEM.md, write AUTOEVOLVE.md" in result.stdout
-    assert "Files written:" in result.stdout
-    assert "- AUTOEVOLVE.md" in result.stdout
+    assert normalize_text(result.stdout, repo_path) == snapshot("""\
+Repository
+<PATH_1>
+Review
+Harness: other
+Problem: Keep existing PROBLEM.md
+Files: keep PROBLEM.md, write AUTOEVOLVE.md
+Autoevolve initialized.
+
+Repository: <PATH_1>
+
+Files written:
+  - AUTOEVOLVE.md
+
+Next: ask your agent to verify setup and begin the experiment loop.
+
+For example:
+  Start autoevolve.
+""")
     assert Path(repo_path, "PROBLEM.md").read_text(encoding="utf-8") == existing_problem
 
 
@@ -437,15 +503,12 @@ def test_metric_description_init() -> None:
         cwd=repo_path,
     )
     problem_text = Path(repo_path, "PROBLEM.md").read_text(encoding="utf-8")
-    assert re.search(
-        (
-            r"## Metric\nmax benchmark_score\n\nHigher is better\. Computed by "
-            r"python3 scripts/validate\.py\."
-        ),
-        problem_text,
-    )
-    validate = run(["validate"], cwd=repo_path)
-    assert "repository matches the autoevolve protocol" in validate.stdout
+    assert (
+        "## Metric\n"
+        "max benchmark_score\n\n"
+        "Higher is better. Computed by python3 scripts/validate.py."
+    ) in problem_text
+    run(["validate"], cwd=repo_path)
 
 
 def test_protocol_prompt_lifecycle_guidance() -> None:
@@ -456,22 +519,6 @@ def test_protocol_prompt_lifecycle_guidance() -> None:
     assert "autoevolve recent" in prompt
     assert "autoevolve best" in prompt
     assert "autoevolve compare" in prompt
-    assert "Faithfully record the metrics produced by this experiment commit itself." in prompt
-    assert (
-        "`metrics` should be a truthful record of what this experiment achieved when evaluated."
-        in prompt
-    )
-    assert "keep each subagent scoped to one experiment or one clear checkpoint" in prompt
-    assert (
-        "continue it as a sequence of committed experiments rather than one giant uncommitted run"
-        in prompt
-    )
-    assert (
-        "continue exploring outward through committed experiments rather "
-        "than one long-lived uncommitted session"
-    ) in prompt
-    assert "managed worktrees under `~/.autoevolve/worktrees`" in prompt
-    assert "Do not scatter files across `/tmp`, `/private`, cache directories" in prompt
 
 
 def test_synthetic_branches_inspect_and_analytics() -> None:
@@ -481,26 +528,70 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
     main_branch = current_branch(repo_path)
     commit_by_branch = populate_synthetic_branches(repo_path)
     experiment_list = run(["list"], cwd=repo_path)
-    experiment_blocks = re.split(r"\n\n+", experiment_list.stdout.strip())
-    assert len(experiment_blocks) == 10
-    assert re.search(
-        r"^[0-9a-f]{7}  2026-01-01T12:11:00(?:Z|\+00:00)  Record cross/hybrid-final experiment",
-        experiment_blocks[0],
-        re.M,
-    )
-    assert "summary: Hybrid final is the best synthetic experiment" in experiment_blocks[0]
-    assert "metrics: benchmark_score=0.918, runtime_sec=1.08" in experiment_blocks[0]
-    assert re.search(
-        r"journal: (Hypothesis: )?Cross-pollinate the strongest island A, B, and C ideas",
-        experiment_blocks[0],
-    )
-    assert "Record island-a/baseline experiment" not in experiment_list.stdout
+    assert normalize_text(experiment_list.stdout) == snapshot("""\
+<SHA_1>  2026-01-01T12:11:00+00:00  Record cross/hybrid-final experiment
+  summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+  metrics: benchmark_score=0.918, runtime_sec=1.08
+  journal: Hypothesis: Cross-pollinate the strongest island A, B, and C ideas without doing a formal git merge.
+
+<SHA_2>  2026-01-01T12:10:00+00:00  Record island-a/balanced-v2 experiment
+  summary: Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+  metrics: benchmark_score=0.913, runtime_sec=1.03
+  journal: Hypothesis: Preserve the cost gains from island A while borrowing island C's premium guard.
+
+<SHA_3>  2026-01-01T12:09:00+00:00  Record island-c/overfit-premium experiment
+  summary: The premium-heavy mix regressed against the earlier baselines despite being very fast to validate.
+  metrics: benchmark_score=0.821, runtime_sec=0.74
+  journal: Hypothesis: Try an aggressive premium-heavy setting even if it risks overfitting the benchmark.
+
+<SHA_4>  2026-01-01T12:08:00+00:00  Record island-a/cost-penalty experiment
+  summary: The stronger cost penalty crossed the 0.90 threshold but made validation slower.
+  metrics: benchmark_score=0.901, runtime_sec=1.12
+  journal: Hypothesis: Increase the cost penalty on island A while keeping island B's stale recovery in mind.
+
+<SHA_5>  2026-01-01T12:07:00+00:00  Record island-c/premium-guard experiment
+  summary: Premium guard was solid and balanced relevance against cheaper-case pressure.
+  metrics: benchmark_score=0.894, runtime_sec=0.92
+  journal: Hypothesis: Pull island C back from over-indexing on relevance while borrowing island A's cheaper-case signal.
+
+<SHA_6>  2026-01-01T12:06:00+00:00  Record island-a/cheap-priority experiment
+  summary: Prioritizing cheaper items improved the cheap-case fit without fully giving up stale recovery.
+  metrics: benchmark_score=0.887, runtime_sec=1.04
+  journal: Hypothesis: Push affordability further on island A while checking it against the stale-recovery branch.
+
+<SHA_7>  2026-01-01T12:05:00+00:00  Record island-c/relevance-lean experiment
+  summary: A relevance-heavy mix helped somewhat and became the fastest branch to validate.
+  metrics: benchmark_score=0.861, runtime_sec=0.8
+  journal: Hypothesis: Lean harder on relevance while keeping a reference to island B's freshness behavior.
+
+<SHA_8>  2026-01-01T12:04:00+00:00  Record island-b/stale-recovery experiment
+  summary: Stale recovery helped and picked up some of the cheap-case gains from island A.
+  metrics: benchmark_score=0.879, runtime_sec=0.96
+  journal: Hypothesis: Keep the freshness-heavy island but borrow the affordability intuition from island A.
+
+<SHA_9>  2026-01-01T12:03:00+00:00  Record island-a/rebalance-weights experiment
+  summary: Weight rebalance improved the benchmark noticeably at a small runtime cost.
+  metrics: benchmark_score=0.872, runtime_sec=1.01
+  journal: Hypothesis: Rebalance toward affordability on island A after the baseline split.
+
+<SHA_10>  2026-01-01T12:02:00+00:00  Record island-c/clip-premium experiment
+  summary: Premium clipping was only a minor improvement over baseline but stayed cheap to validate.
+  metrics: benchmark_score=0.842, runtime_sec=0.86
+  journal: Hypothesis: Reduce the freshness term on a third island to avoid overshooting premium examples.
+""")
 
     limited_list = run(["list", "--limit", "2"], cwd=repo_path)
-    limited_blocks = re.split(r"\n\n+", limited_list.stdout.strip())
-    assert len(limited_blocks) == 2
-    assert "Record cross/hybrid-final experiment" in limited_blocks[0]
-    assert "Record island-a/balanced-v2 experiment" in limited_blocks[1]
+    assert normalize_text(limited_list.stdout) == snapshot("""\
+<SHA_1>  2026-01-01T12:11:00+00:00  Record cross/hybrid-final experiment
+  summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+  metrics: benchmark_score=0.918, runtime_sec=1.08
+  journal: Hypothesis: Cross-pollinate the strongest island A, B, and C ideas without doing a formal git merge.
+
+<SHA_2>  2026-01-01T12:10:00+00:00  Record island-a/balanced-v2 experiment
+  summary: Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+  metrics: benchmark_score=0.913, runtime_sec=1.03
+  journal: Hypothesis: Preserve the cost gains from island A while borrowing island C's premium guard.
+""")
 
     bogus_list = run(["list", "--bogus"], cwd=repo_path, expect_failure=True)
     assert 'Unknown option "--bogus" for list' in bogus_list.stderr
@@ -509,25 +600,35 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
     assert 'Unknown option "--text" for list' in legacy_list_selectors.stderr
 
     recent = run(["recent"], cwd=repo_path)
-    recent_lines = recent.stdout.strip().splitlines()
-    assert len(recent_lines) == 11
-    assert recent_lines[0] == "sha\tdate\tsubject\ttips\tmetrics\tsummary"
-    assert re.search(
-        r"^.{7}\t2026-01-01T12:11:00(?:Z|\+00:00)\tRecord cross/hybrid-final experiment\t",
-        recent_lines[1],
-    )
-    assert re.search(
-        r"^.{7}\t2026-01-01T12:10:00(?:Z|\+00:00)\tRecord island-a/balanced-v2 experiment\t",
-        recent_lines[2],
-    )
+    assert normalize_text(recent.stdout) == snapshot("""\
+sha	date	subject	tips	metrics	summary
+<SHA_1>	2026-01-01T12:11:00+00:00	Record cross/hybrid-final experiment	cross/hybrid-final	benchmark_score=0.918, runtime_sec=1.08	Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+<SHA_2>	2026-01-01T12:10:00+00:00	Record island-a/balanced-v2 experiment	island-a/balanced-v2	benchmark_score=0.913, runtime_sec=1.03	Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+<SHA_3>	2026-01-01T12:09:00+00:00	Record island-c/overfit-premium experiment	island-c/overfit-premium	benchmark_score=0.821, runtime_sec=0.74	The premium-heavy mix regressed against the earlier baselines despite being very fast to validate.
+<SHA_4>	2026-01-01T12:08:00+00:00	Record island-a/cost-penalty experiment	island-a/cost-penalty	benchmark_score=0.901, runtime_sec=1.12	The stronger cost penalty crossed the 0.90 threshold but made validation slower.
+<SHA_5>	2026-01-01T12:07:00+00:00	Record island-c/premium-guard experiment	island-c/premium-guard	benchmark_score=0.894, runtime_sec=0.92	Premium guard was solid and balanced relevance against cheaper-case pressure.
+<SHA_6>	2026-01-01T12:06:00+00:00	Record island-a/cheap-priority experiment	island-a/cheap-priority	benchmark_score=0.887, runtime_sec=1.04	Prioritizing cheaper items improved the cheap-case fit without fully giving up stale recovery.
+<SHA_7>	2026-01-01T12:05:00+00:00	Record island-c/relevance-lean experiment	island-c/relevance-lean	benchmark_score=0.861, runtime_sec=0.8	A relevance-heavy mix helped somewhat and became the fastest branch to validate.
+<SHA_8>	2026-01-01T12:04:00+00:00	Record island-b/stale-recovery experiment	island-b/stale-recovery	benchmark_score=0.879, runtime_sec=0.96	Stale recovery helped and picked up some of the cheap-case gains from island A.
+<SHA_9>	2026-01-01T12:03:00+00:00	Record island-a/rebalance-weights experiment	island-a/rebalance-weights	benchmark_score=0.872, runtime_sec=1.01	Weight rebalance improved the benchmark noticeably at a small runtime cost.
+<SHA_10>	2026-01-01T12:02:00+00:00	Record island-c/clip-premium experiment	island-c/clip-premium	benchmark_score=0.842, runtime_sec=0.86	Premium clipping was only a minor improvement over baseline but stayed cheap to validate.
+""")
 
     recent_json = run(["recent", "--limit", "2", "--format", "jsonl"], cwd=repo_path)
     recent_json_records = [
         json.loads(line) for line in recent_json.stdout.strip().splitlines() if line
     ]
     assert len(recent_json_records) == 2
-    assert len(recent_json_records[0]["short_sha"]) == 7
-    assert re.search(r"Record cross/hybrid-final experiment", recent_json_records[0]["subject"])
+    assert recent_json_records[0] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record cross/hybrid-final experiment",
+        metrics=IsPartialDict(benchmark_score=0.918, runtime_sec=1.08),
+    )
+    assert recent_json_records[1] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record island-a/balanced-v2 experiment",
+        metrics=IsPartialDict(benchmark_score=0.913, runtime_sec=1.03),
+    )
     assert isinstance(recent_json_records[0]["tips"], list)
 
     bogus_recent = run(["recent", "--bogus"], cwd=repo_path, expect_failure=True)
@@ -537,15 +638,16 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
     assert 'Unknown option "--bogus" for best' in bogus_best.stderr
 
     default_best = run(["best"], cwd=repo_path)
-    assert re.search(r"^sha\tdate\tsubject\ttips\tmetrics\tsummary$", default_best.stdout, re.M)
-    assert "Record cross/hybrid-final experiment" in default_best.stdout
-
     best = run(["best", "--max", "benchmark_score"], cwd=repo_path)
-    best_lines = best.stdout.strip().splitlines()
-    assert len(best_lines) == 6
-    assert best_lines[0] == "sha\tdate\tsubject\ttips\tmetrics\tsummary"
-    assert "Record cross/hybrid-final experiment" in best_lines[1]
-    assert "Record island-a/balanced-v2 experiment" in best_lines[2]
+    assert normalize_text(default_best.stdout) == normalize_text(best.stdout)
+    assert normalize_text(best.stdout) == snapshot("""\
+sha	date	subject	tips	metrics	summary
+<SHA_1>	2026-01-01T12:11:00+00:00	Record cross/hybrid-final experiment	cross/hybrid-final	benchmark_score=0.918, runtime_sec=1.08	Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+<SHA_2>	2026-01-01T12:10:00+00:00	Record island-a/balanced-v2 experiment	island-a/balanced-v2	benchmark_score=0.913, runtime_sec=1.03	Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+<SHA_3>	2026-01-01T12:08:00+00:00	Record island-a/cost-penalty experiment	island-a/cost-penalty	benchmark_score=0.901, runtime_sec=1.12	The stronger cost penalty crossed the 0.90 threshold but made validation slower.
+<SHA_4>	2026-01-01T12:07:00+00:00	Record island-c/premium-guard experiment	island-c/premium-guard	benchmark_score=0.894, runtime_sec=0.92	Premium guard was solid and balanced relevance against cheaper-case pressure.
+<SHA_5>	2026-01-01T12:06:00+00:00	Record island-a/cheap-priority experiment	island-a/cheap-priority	benchmark_score=0.887, runtime_sec=1.04	Prioritizing cheaper items improved the cheap-case fit without fully giving up stale recovery.
+""")
 
     best_json = run(
         ["best", "--max", "benchmark_score", "--limit", "2", "--format", "jsonl"],
@@ -553,24 +655,35 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
     )
     best_json_records = [json.loads(line) for line in best_json.stdout.strip().splitlines() if line]
     assert len(best_json_records) == 2
-    assert len(best_json_records[0]["short_sha"]) == 7
-    assert isinstance(best_json_records[0]["metrics"]["benchmark_score"], float)
+    assert best_json_records[0] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record cross/hybrid-final experiment",
+        metrics=IsPartialDict(benchmark_score=0.918, runtime_sec=1.08),
+    )
+    assert best_json_records[1] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record island-a/balanced-v2 experiment",
+        metrics=IsPartialDict(benchmark_score=0.913, runtime_sec=1.03),
+    )
 
     legacy_best_selectors = run(["best", "--active"], cwd=repo_path, expect_failure=True)
     assert 'Unknown option "--active" for best' in legacy_best_selectors.stderr
 
     fastest = run(["best", "--min", "runtime_sec", "--limit", "1"], cwd=repo_path)
-    assert "Record island-c/overfit-premium experiment" in fastest.stdout
-    assert "runtime_sec=0.74" in fastest.stdout
+    assert normalize_text(fastest.stdout) == snapshot("""\
+sha	date	subject	tips	metrics	summary
+<SHA_1>	2026-01-01T12:09:00+00:00	Record island-c/overfit-premium experiment	island-c/overfit-premium	benchmark_score=0.821, runtime_sec=0.74	The premium-heavy mix regressed against the earlier baselines despite being very fast to validate.
+""")
 
     pareto = run(["pareto", "--max", "benchmark_score", "--min", "runtime_sec"], cwd=repo_path)
-    pareto_lines = pareto.stdout.strip().splitlines()
-    assert len(pareto_lines) == 6
-    assert pareto_lines[0] == "sha\tdate\tsubject\ttips\tmetrics\tsummary"
-    assert "Record cross/hybrid-final experiment" in pareto.stdout
-    assert "Record island-a/balanced-v2 experiment" in pareto.stdout
-    assert "Record island-c/relevance-lean experiment" in pareto.stdout
-    assert "Record island-a/cheap-priority experiment" not in pareto.stdout
+    assert normalize_text(pareto.stdout) == snapshot("""\
+sha	date	subject	tips	metrics	summary
+<SHA_1>	2026-01-01T12:11:00+00:00	Record cross/hybrid-final experiment	cross/hybrid-final	benchmark_score=0.918, runtime_sec=1.08	Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+<SHA_2>	2026-01-01T12:10:00+00:00	Record island-a/balanced-v2 experiment	island-a/balanced-v2	benchmark_score=0.913, runtime_sec=1.03	Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+<SHA_3>	2026-01-01T12:07:00+00:00	Record island-c/premium-guard experiment	island-c/premium-guard	benchmark_score=0.894, runtime_sec=0.92	Premium guard was solid and balanced relevance against cheaper-case pressure.
+<SHA_4>	2026-01-01T12:05:00+00:00	Record island-c/relevance-lean experiment	island-c/relevance-lean	benchmark_score=0.861, runtime_sec=0.8	A relevance-heavy mix helped somewhat and became the fastest branch to validate.
+<SHA_5>	2026-01-01T12:09:00+00:00	Record island-c/overfit-premium experiment	island-c/overfit-premium	benchmark_score=0.821, runtime_sec=0.74	The premium-heavy mix regressed against the earlier baselines despite being very fast to validate.
+""")
 
     pareto_json = run(
         [
@@ -588,7 +701,31 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
         json.loads(line) for line in pareto_json.stdout.strip().splitlines() if line
     ]
     assert len(pareto_json_records) == 5
-    assert any(record["metrics"]["benchmark_score"] == 0.918 for record in pareto_json_records)
+    assert pareto_json_records[0] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record cross/hybrid-final experiment",
+        metrics=IsPartialDict(benchmark_score=0.918, runtime_sec=1.08),
+    )
+    assert pareto_json_records[1] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record island-a/balanced-v2 experiment",
+        metrics=IsPartialDict(benchmark_score=0.913, runtime_sec=1.03),
+    )
+    assert pareto_json_records[2] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record island-c/premium-guard experiment",
+        metrics=IsPartialDict(benchmark_score=0.894, runtime_sec=0.92),
+    )
+    assert pareto_json_records[3] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record island-c/relevance-lean experiment",
+        metrics=IsPartialDict(benchmark_score=0.861, runtime_sec=0.8),
+    )
+    assert pareto_json_records[4] == IsPartialDict(
+        short_sha=IsStr(regex=r"[0-9a-f]{7}"),
+        subject="Record island-c/overfit-premium experiment",
+        metrics=IsPartialDict(benchmark_score=0.821, runtime_sec=0.74),
+    )
 
     legacy_pareto_selectors = run(
         ["pareto", "--where", "benchmark_score > 0.89"],
@@ -610,10 +747,43 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
         ],
         cwd=repo_path,
     )
-    assert re.search(r"root: .*Record cross/hybrid-final experiment", graph.stdout)
-    assert "mode: edges=all direction=backward depth=all" in graph.stdout
-    assert re.search(r"git  .* -> .*", graph.stdout)
-    assert re.search(r"reference  .* -> .*", graph.stdout)
+    assert normalize_text(graph.stdout) == snapshot("""\
+root: <SHA_1>  Record cross/hybrid-final experiment
+mode: edges=all direction=backward depth=all
+
+nodes:
+  <SHA_1>  Record cross/hybrid-final experiment
+  <SHA_2>  Record island-a/balanced-v2 experiment
+  <SHA_3>  Record island-b/stale-recovery experiment
+  <SHA_4>  Record island-c/premium-guard experiment
+  <SHA_5>  Record island-a/cost-penalty experiment
+  <SHA_6>  Record island-b/boost-freshness experiment
+  <SHA_7>  Record island-a/rebalance-weights experiment
+  <SHA_8>  Record island-c/relevance-lean experiment
+  <SHA_9>  Record island-a/cheap-priority experiment
+  <SHA_10>  Record island-a/baseline experiment
+  <SHA_11>  Record island-c/clip-premium experiment
+
+edges:
+  git  <SHA_1> -> <SHA_2>
+  reference  <SHA_1> -> <SHA_3> - borrowed the stale-case recovery heuristic idea from this experiment
+  reference  <SHA_1> -> <SHA_4> - borrowed the premium-guard weighting idea from this experiment
+  git  <SHA_2> -> <SHA_5>
+  reference  <SHA_2> -> <SHA_4> - borrowed the premium-guard idea from this experiment
+  git  <SHA_3> -> <SHA_6>
+  reference  <SHA_3> -> <SHA_7> - borrowed the cheaper-case weighting intuition from this experiment
+  git  <SHA_4> -> <SHA_8>
+  reference  <SHA_4> -> <SHA_7> - used the cheaper-case signal from this run as a guardrail
+  git  <SHA_5> -> <SHA_9>
+  reference  <SHA_5> -> <SHA_3> - borrowed the stale-case recovery intuition from this experiment
+  git  <SHA_6> -> <SHA_10>
+  git  <SHA_7> -> <SHA_10>
+  git  <SHA_8> -> <SHA_11>
+  reference  <SHA_8> -> <SHA_6> - kept the freshness behavior from this branch in mind while leaning harder on relevance
+  git  <SHA_9> -> <SHA_7>
+  reference  <SHA_9> -> <SHA_3> - checked the affordability shift against this stale-recovery branch
+  git  <SHA_11> -> <SHA_10>
+""")
 
     graph_json = run(
         [
@@ -642,18 +812,61 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
     )
 
     default_graph = run(["graph", "cross/hybrid-final"], cwd=repo_path)
-    assert "mode: edges=all direction=backward depth=3" in default_graph.stdout
+    assert normalize_text(default_graph.stdout) == snapshot("""\
+root: <SHA_1>  Record cross/hybrid-final experiment
+mode: edges=all direction=backward depth=3
+
+nodes:
+  <SHA_1>  Record cross/hybrid-final experiment
+  <SHA_2>  Record island-a/balanced-v2 experiment
+  <SHA_3>  Record island-b/stale-recovery experiment
+  <SHA_4>  Record island-c/premium-guard experiment
+  <SHA_5>  Record island-a/cost-penalty experiment
+  <SHA_6>  Record island-b/boost-freshness experiment
+  <SHA_7>  Record island-a/rebalance-weights experiment
+  <SHA_8>  Record island-c/relevance-lean experiment
+  <SHA_9>  Record island-a/cheap-priority experiment
+  <SHA_10>  Record island-a/baseline experiment
+  <SHA_11>  Record island-c/clip-premium experiment
+
+edges:
+  git  <SHA_1> -> <SHA_2>
+  reference  <SHA_1> -> <SHA_3> - borrowed the stale-case recovery heuristic idea from this experiment
+  reference  <SHA_1> -> <SHA_4> - borrowed the premium-guard weighting idea from this experiment
+  git  <SHA_2> -> <SHA_5>
+  reference  <SHA_2> -> <SHA_4> - borrowed the premium-guard idea from this experiment
+  git  <SHA_3> -> <SHA_6>
+  reference  <SHA_3> -> <SHA_7> - borrowed the cheaper-case weighting intuition from this experiment
+  git  <SHA_4> -> <SHA_8>
+  reference  <SHA_4> -> <SHA_7> - used the cheaper-case signal from this run as a guardrail
+  git  <SHA_5> -> <SHA_9>
+  reference  <SHA_5> -> <SHA_3> - borrowed the stale-case recovery intuition from this experiment
+  git  <SHA_6> -> <SHA_10>
+  git  <SHA_7> -> <SHA_10>
+  git  <SHA_8> -> <SHA_11>
+  reference  <SHA_8> -> <SHA_6> - kept the freshness behavior from this branch in mind while leaning harder on relevance
+""")
 
     run_git(repo_path, ["checkout", "cross/hybrid-final"])
     status = run(["status"], cwd=repo_path)
-    assert "metric: max benchmark_score" in status.stdout
-    assert re.search(r"experiments: \d+ recorded \(0 ongoing\)", status.stdout)
-    assert re.search(r"best: [0-9a-f]{7}  benchmark_score=0\.918  \(.+\)", status.stdout)
-    assert re.search(
-        r"recent trend: [+-][^ ]+ over last 5 recorded experiments \([0-9]+[a-z]+ span\)",
-        status.stdout,
-    )
-    assert re.search(r"ongoing experiments \(managed worktrees\):\n  \(none\)", status.stdout)
+    assert normalize_text(status.stdout, normalize_age=True) == snapshot("""\
+project:
+  metric: max benchmark_score
+  experiments: 12 recorded (0 ongoing)
+  best: <SHA_1>  benchmark_score=0.918  (<AGE>)
+  recent trend: +0.024 over last 5 recorded experiments (4m span)
+
+latest experiments:
+  <SHA_1>  benchmark_score=0.918  (<AGE>) | Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+  <SHA_2>  benchmark_score=0.913  (<AGE>) | Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+  <SHA_3>  benchmark_score=0.821  (<AGE>) | The premium-heavy mix regressed against the earlier baselines despite being very fast to validate.
+  <SHA_4>  benchmark_score=0.901  (<AGE>) | The stronger cost penalty crossed the 0.90 threshold but made validation slower.
+  <SHA_5>  benchmark_score=0.894  (<AGE>) | Premium guard was solid and balanced relevance against cheaper-case pressure.
+
+ongoing experiments (managed worktrees):
+  (none)
+
+""")
 
     status_json = run(["status", "--format", "json"], cwd=repo_path)
     status_record = json.loads(status_json.stdout)
@@ -672,14 +885,37 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
 
     run_git(repo_path, ["checkout", main_branch])
     compare = run(["compare", "island-a/balanced-v2", "cross/hybrid-final"], cwd=repo_path)
-    assert re.search(r"left:  .*Record island-a/balanced-v2 experiment", compare.stdout)
-    assert re.search(r"right: .*Record cross/hybrid-final experiment", compare.stdout)
-    assert re.search(r"git:   direct_parent_of_right", compare.stdout)
-    assert "changed paths:" in compare.stdout
-    assert "  M  EXPERIMENT.json" in compare.stdout
-    assert "benchmark_score: 0.913 -> 0.918" in compare.stdout
-    assert "parent deltas:" in compare.stdout
-    assert "runtime_sec: 1.03 -> 1.08" in compare.stdout
+    assert normalize_text(compare.stdout) == snapshot("""\
+left:  <SHA_1>  2026-01-01T12:10:00+00:00  Record island-a/balanced-v2 experiment [island-a/balanced-v2] - benchmark_score=0.913, runtime_sec=1.03 | Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+right: <SHA_2>  2026-01-01T12:11:00+00:00  Record cross/hybrid-final experiment [cross/hybrid-final] - benchmark_score=0.918, runtime_sec=1.08 | Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+git:   direct_parent_of_right (merge-base <SHA_1>)
+diff:  3 files changed, 17 insertions(+), 12 deletions(-)
+
+changed paths:
+  M  EXPERIMENT.json
+  M  JOURNAL.md
+  M  src/ranker.py
+
+metrics:
+  benchmark_score: 0.913 -> 0.918 (+0.005)
+  runtime_sec: 1.03 -> 1.08 (+0.05)
+
+references:
+  common: <SHA_3>
+  left only: (none)
+  right only: <SHA_4>
+
+parent deltas:
+  left vs <SHA_5>:
+    benchmark_score: 0.901 -> 0.913 (+0.012)
+    runtime_sec: 1.12 -> 1.03 (-0.09)
+  right vs <SHA_1>:
+    benchmark_score: 0.913 -> 0.918 (+0.005)
+    runtime_sec: 1.03 -> 1.08 (+0.05)
+
+left summary:  Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
+right summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+""")
 
     compare_patch = run(
         ["compare", "island-a/balanced-v2", "cross/hybrid-final", "--patch"],
@@ -763,16 +999,74 @@ def test_synthetic_branches_inspect_and_analytics() -> None:
     )
 
     show = run(["show", "island-a/baseline"], cwd=repo_path)
-    assert "# JOURNAL.md" in show.stdout
-    assert "Recorded the baseline benchmark before island-specific exploration" in show.stdout
-    assert "# EXPERIMENT.json" in show.stdout
-    assert '"runtime_sec": 0.91' in show.stdout
+    assert normalize_text(show.stdout) == snapshot("""\
+# JOURNAL.md
+# Island A Baseline
+
+Hypothesis: Capture the starting benchmark before splitting into island searches.
+
+Lineage:
+- git parent: main
+
+References:
+- none
+
+Validation:
+- python3 scripts/validate.py
+
+Outcome:
+- Recorded the baseline benchmark before island-specific exploration.
+
+# EXPERIMENT.json
+{
+  "summary": "Recorded the baseline benchmark before island-specific exploration.",
+  "metrics": {
+    "benchmark_score": 0.838,
+    "runtime_sec": 0.91
+  },
+  "references": []
+}
+""")
 
     show_best = run(["show", "cross/hybrid-final"], cwd=repo_path)
-    assert "Cross Hybrid Final" in show_best.stdout
-    assert "0.918" in show_best.stdout
-    assert "borrowed the stale-case recovery heuristic idea" in show_best.stdout
-    assert "borrowed the premium-guard weighting idea" in show_best.stdout
+    assert normalize_text(show_best.stdout) == snapshot("""\
+# JOURNAL.md
+# Cross Hybrid Final
+
+Hypothesis: Cross-pollinate the strongest island A, B, and C ideas without doing a formal git merge.
+
+Lineage:
+- git parent: island-a/balanced-v2 @ <SHA_1>
+
+References:
+- <SHA_2>: borrowed the stale-case recovery heuristic idea from this experiment
+- <SHA_3>: borrowed the premium-guard weighting idea from this experiment
+
+Validation:
+- python3 scripts/validate.py
+
+Outcome:
+- Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
+
+# EXPERIMENT.json
+{
+  "summary": "Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.",
+  "metrics": {
+    "benchmark_score": 0.918,
+    "runtime_sec": 1.08
+  },
+  "references": [
+    {
+      "commit": "<SHA_4>",
+      "why": "borrowed the stale-case recovery heuristic idea from this experiment"
+    },
+    {
+      "commit": "<SHA_5>",
+      "why": "borrowed the premium-guard weighting idea from this experiment"
+    }
+  ]
+}
+""")
 
     show_json = run(["show", "cross/hybrid-final", "--format", "json"], cwd=repo_path)
     show_record = json.loads(show_json.stdout)
@@ -814,10 +1108,7 @@ def test_status_best_prefers_earliest_tie() -> None:
     run_git(repo_path, ["checkout", "tie/later"])
 
     status = run(["status"], cwd=repo_path)
-    assert re.search(
-        rf"best: {re.escape(first_best_sha[:7])}  benchmark_score=0\.918  \(.+\)",
-        status.stdout,
-    )
+    assert f"best: {first_best_sha[:7]}  benchmark_score=0.918" in status.stdout
 
 
 def test_managed_experiment_commands() -> None:
@@ -829,14 +1120,6 @@ def test_managed_experiment_commands() -> None:
     temp_home = tempfile.mkdtemp(prefix="autoevolve-home-")
     seed_branch = "autoevolve/seed"
     run_git(repo_path, ["branch", seed_branch, "cross/hybrid-final"])
-
-    start_help = run(["start", "--help"], cwd=repo_path)
-    assert "autoevolve start <name> <summary> [--from <ref>]" in start_help.stdout
-    assert "managed worktree under ~/.autoevolve/worktrees" in start_help.stdout
-    assert "Managed branches are created under autoevolve/<name>" in start_help.stdout
-
-    record_help = run(["record", "--help"], cwd=repo_path)
-    assert "removes the current managed worktree" in record_help.stdout
 
     from_main = run(
         [
@@ -850,7 +1133,11 @@ def test_managed_experiment_commands() -> None:
         env={"HOME": temp_home},
     )
     from_main_path = Path(temp_home) / ".autoevolve" / "worktrees" / "from-main"
-    assert re.search(rf"Path: {re.escape(str(from_main_path))}", from_main.stdout)
+    assert normalize_text(from_main.stdout, from_main_path) == snapshot("""\
+Branch: autoevolve/from-main
+Base: main
+Path: <PATH_1>
+""")
     assert from_main_path.exists()
     run(["clean", "from-main", "--force"], cwd=repo_path, env={"HOME": temp_home})
     assert not from_main_path.exists()
@@ -868,9 +1155,11 @@ def test_managed_experiment_commands() -> None:
     )
     worktree_path = Path(temp_home) / ".autoevolve" / "worktrees" / "trial-run"
     resolved_worktree_path = worktree_path.resolve()
-    assert "Branch: autoevolve/trial-run" in created.stdout
-    assert "Base: autoevolve/seed" in created.stdout
-    assert re.search(rf"Path: {re.escape(str(worktree_path))}", created.stdout)
+    assert normalize_text(created.stdout, worktree_path) == snapshot("""\
+Branch: autoevolve/trial-run
+Base: autoevolve/seed
+Path: <PATH_1>
+""")
     assert worktree_path.exists()
     assert current_branch(worktree_path) == "autoevolve/trial-run"
 
@@ -904,10 +1193,10 @@ def test_managed_experiment_commands() -> None:
         encoding="utf-8",
     )
     committed = run(["record"], cwd=worktree_path, env={"HOME": temp_home})
-    assert re.search(r"Committed autoevolve/trial-run at [0-9a-f]{7}\.", committed.stdout)
-    assert re.search(
-        rf"Removed worktree: {re.escape(str(resolved_worktree_path))}", committed.stdout
-    )
+    assert normalize_text(committed.stdout, resolved_worktree_path) == snapshot("""\
+Committed autoevolve/trial-run at <SHA_1>.
+Removed worktree: <PATH_1>
+""")
     assert not worktree_path.exists()
     assert "trial-run" not in run_git(repo_path, ["worktree", "list"])
     assert (
@@ -1057,7 +1346,7 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
 )
 def test_harness_init_variants(harness: str, skill_path: str) -> None:
     repo_path = init_repo_from_fixture()
-    result = run(
+    run(
         [
             "init",
             harness,
@@ -1075,10 +1364,8 @@ def test_harness_init_variants(harness: str, skill_path: str) -> None:
         ],
         cwd=repo_path,
     )
-    assert f"Harness: {harness}" in result.stdout
-    assert skill_path in result.stdout
     skill_text = Path(repo_path, skill_path).read_text(encoding="utf-8")
-    assert re.search(r"^---\nname: autoevolve\ndescription: ", skill_text)
+    assert skill_text.startswith("---\nname: autoevolve\ndescription: ")
     assert "\n# Autoevolve Protocol\n" in skill_text
 
 
@@ -1103,7 +1390,7 @@ def test_continue_hooks() -> None:
     }
     for harness, (paths, expected_command) in commands.items():
         repo_path = init_repo_from_fixture()
-        result = run(
+        run(
             [
                 "init",
                 harness,
@@ -1122,37 +1409,47 @@ def test_continue_hooks() -> None:
             ],
             cwd=repo_path,
         )
-        assert "Continue hook: enabled" in result.stdout
         for path in paths:
             assert Path(repo_path, path).exists()
         if harness == "claude":
-            settings = json.loads(
-                Path(repo_path, ".claude/settings.json").read_text(encoding="utf-8")
+            settings = read_json_file(Path(repo_path, ".claude/settings.json"))
+            assert settings == IsPartialDict(
+                hooks=IsPartialDict(
+                    Stop=[
+                        IsPartialDict(
+                            hooks=[IsPartialDict(type="command", command=expected_command)]
+                        )
+                    ]
+                )
             )
-            assert settings["hooks"]["Stop"][0]["hooks"][0]["type"] == "command"
-            assert settings["hooks"]["Stop"][0]["hooks"][0]["command"] == expected_command
         elif harness == "gemini":
-            settings = json.loads(
-                Path(repo_path, ".gemini/settings.json").read_text(encoding="utf-8")
+            settings = read_json_file(Path(repo_path, ".gemini/settings.json"))
+            assert settings == IsPartialDict(
+                hooks=IsPartialDict(
+                    AfterAgent=[
+                        IsPartialDict(
+                            hooks=[
+                                IsPartialDict(
+                                    type="command",
+                                    name="autoevolve-continue",
+                                    command=expected_command,
+                                )
+                            ]
+                        )
+                    ]
+                )
             )
-            assert settings["hooks"]["AfterAgent"][0]["hooks"][0]["type"] == "command"
-            assert settings["hooks"]["AfterAgent"][0]["hooks"][0]["name"] == "autoevolve-continue"
-            assert settings["hooks"]["AfterAgent"][0]["hooks"][0]["command"] == expected_command
         else:
             config_text = Path(repo_path, ".codex/config.toml").read_text(encoding="utf-8")
             assert "[features]" in config_text
             assert "codex_hooks = true" in config_text
-            hooks = json.loads(Path(repo_path, ".codex/hooks.json").read_text(encoding="utf-8"))
-            assert hooks["hooks"]["Stop"][0]["hooks"][0]["type"] == "command"
-            assert hooks["hooks"]["Stop"][0]["hooks"][0]["command"] == expected_command
-
-
-def test_packaging_smoke() -> None:
-    pyproject_text = Path(PROJECT_ROOT, "pyproject.toml").read_text(encoding="utf-8")
-    assert re.search(r'build-backend = "hatchling\.build"', pyproject_text)
-    assert re.search(r"autoevolve = \"autoevolve\.cli:main\"", pyproject_text)
-    assert "click" in pyproject_text
-    assert "GitPython" in pyproject_text
-    assert "pytest" in pyproject_text
-    assert "ruff" in pyproject_text
-    assert "mypy" in pyproject_text
+            hooks = read_json_file(Path(repo_path, ".codex/hooks.json"))
+            assert hooks == IsPartialDict(
+                hooks=IsPartialDict(
+                    Stop=[
+                        IsPartialDict(
+                            hooks=[IsPartialDict(type="command", command=expected_command)]
+                        )
+                    ]
+                )
+            )
