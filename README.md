@@ -21,13 +21,13 @@ That installs `pytest`, `ruff`, `mypy`, `inline-snapshot`, and `dirty-equals`.
 ## Run
 
 ```bash
-uv run autoevolve help
+uv run autoevolve --help
 ```
 
 Or:
 
 ```bash
-uv run python -m autoevolve help
+uv run python -m autoevolve --help
 ```
 
 ## Commands

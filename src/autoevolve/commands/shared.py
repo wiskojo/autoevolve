@@ -4,7 +4,7 @@ import json
 import os
 import re
 from functools import cmp_to_key
-from typing import Any, TypeVar, cast
+from typing import Any
 
 from autoevolve.constants import MANAGED_WORKTREE_ROOT, ROOT_FILES
 from autoevolve.errors import AutoevolveError
@@ -16,11 +16,10 @@ from autoevolve.gittools import (
     try_git_with_git_dir,
 )
 from autoevolve.models import (
-    BestOptions,
     ExperimentDocument,
     ExperimentRecord,
+    MetricDirection,
     Objective,
-    ParetoOptions,
     PrimaryMetricSpec,
 )
 from autoevolve.problem import parse_problem_primary_metric
@@ -36,7 +35,6 @@ from autoevolve.utils import (
 
 MANAGED_EXPERIMENT_BRANCH_PREFIX = "autoevolve/"
 JOURNAL_STUB_NOTE = "TODO: fill this in once you're done with your experiment."
-FormatT = TypeVar("FormatT", bound=str)
 
 
 def get_record_references(record: ExperimentRecord) -> list[Any]:
@@ -450,34 +448,6 @@ def format_experiment_line(record: ExperimentRecord) -> str:
     return f"{short_sha(record.sha)}  {record.date}  {record.subject}{tips}{suffix}"
 
 
-def parse_positive_integer(flag_name: str, raw_value: str | None) -> int:
-    try:
-        parsed = int(raw_value or "")
-    except ValueError as error:
-        raise AutoevolveError(
-            f'{flag_name} expects a positive integer, received "{raw_value or ""}"'
-        ) from error
-    if parsed <= 0:
-        raise AutoevolveError(
-            f'{flag_name} expects a positive integer, received "{raw_value or ""}"'
-        )
-    return parsed
-
-
-def parse_format(flag_name: str, raw_value: str | None, formats: tuple[FormatT, ...]) -> FormatT:
-    format_value = (raw_value or "").strip()
-    if format_value not in formats:
-        raise AutoevolveError(f"{flag_name} expects one of {', '.join(formats)}")
-    return cast(FormatT, format_value)
-
-
-def parse_ref_value(flag_name: str, raw_value: str | None) -> str:
-    ref = (raw_value or "").strip()
-    if not ref:
-        raise AutoevolveError(f"{flag_name} expects a git ref")
-    return ref
-
-
 def normalize_managed_experiment_name(name: str) -> str:
     trimmed = name.strip()
     if trimmed.startswith(MANAGED_EXPERIMENT_BRANCH_PREFIX):
@@ -498,15 +468,18 @@ def apply_limit(records: list[Any], limit: int | None) -> list[Any]:
 
 
 def resolve_best_objective(
-    repo_root: str, options: BestOptions, metric_names: set[str]
+    repo_root: str,
+    metric_names: set[str],
+    direction: MetricDirection | None,
+    metric: str | None,
 ) -> Objective:
-    if options.direction is not None:
+    if direction is not None:
         return Objective(
-            direction=options.direction,
+            direction=direction,
             metric=validate_metric_name(
-                options.metric,
+                metric or "",
                 metric_names,
-                f"--{options.direction}",
+                f"--{direction}",
             ),
         )
 
@@ -532,7 +505,9 @@ def resolve_best_objective(
     )
 
 
-def validate_pareto_objectives(options: ParetoOptions, metric_names: set[str]) -> list[Objective]:
+def validate_pareto_objectives(
+    objectives: list[Objective], metric_names: set[str]
+) -> list[Objective]:
     return [
         Objective(
             direction=objective.direction,
@@ -542,7 +517,7 @@ def validate_pareto_objectives(options: ParetoOptions, metric_names: set[str]) -
                 f"--{objective.direction}",
             ),
         )
-        for objective in options.objectives
+        for objective in objectives
     ]
 
 

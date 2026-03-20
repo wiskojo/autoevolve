@@ -36,8 +36,6 @@ from autoevolve.commands.shared import (
     is_managed_experiment_branch,
     list_autoevolve_branches,
     list_repo_worktrees,
-    parse_format,
-    parse_positive_integer,
     resolve_ref,
     sort_tip_entries,
     try_read_file_at_ref,
@@ -46,16 +44,11 @@ from autoevolve.constants import ROOT_FILES
 from autoevolve.errors import AutoevolveError
 from autoevolve.gittools import find_repo_root, run_git
 from autoevolve.models import (
-    CompareOptions,
     ExperimentRecord,
     GraphDirection,
     GraphEdges,
-    GraphOptions,
-    ListOptions,
     ObjectOutputFormat,
     PrimaryMetricSpec,
-    ShowOptions,
-    StatusOptions,
 )
 from autoevolve.problem import parse_problem_primary_metric
 from autoevolve.utils import (
@@ -69,165 +62,6 @@ from autoevolve.utils import (
     read_text_file,
     short_sha,
 )
-
-
-def parse_status_options(args: list[str]) -> StatusOptions:
-    output_format: ObjectOutputFormat = "text"
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--format":
-            output_format = parse_format(
-                "--format",
-                args[index + 1] if index + 1 < len(args) else None,
-                ("text", "json"),
-            )
-            index += 2
-            continue
-        if token.startswith("-"):
-            raise AutoevolveError(f'Unknown option "{token}" for status.')
-        raise AutoevolveError(f'Unexpected argument "{token}" for status.')
-    return StatusOptions(format=output_format)
-
-
-def parse_list_options(args: list[str]) -> ListOptions:
-    limit = 10
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--limit":
-            limit = parse_positive_integer(
-                "--limit", args[index + 1] if index + 1 < len(args) else None
-            )
-            index += 2
-            continue
-        if token.startswith("-"):
-            raise AutoevolveError(f'Unknown option "{token}" for list.')
-        raise AutoevolveError(f'Unexpected argument "{token}" for list.')
-    return ListOptions(limit=limit)
-
-
-def parse_depth(raw_value: str | None) -> int | None:
-    normalized = (raw_value or "").strip().lower()
-    if normalized == "all":
-        return None
-    return parse_positive_integer("--depth", raw_value)
-
-
-def parse_graph_options(args: list[str]) -> GraphOptions:
-    depth: int | None = 3
-    direction: GraphDirection = "backward"
-    edges: GraphEdges = "all"
-    output_format: ObjectOutputFormat = "text"
-    ref = ""
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--edges":
-            edges = parse_format(
-                "--edges",
-                args[index + 1] if index + 1 < len(args) else None,
-                ("git", "references", "all"),
-            )
-            index += 2
-            continue
-        if token == "--direction":
-            direction = parse_format(
-                "--direction",
-                args[index + 1] if index + 1 < len(args) else None,
-                ("backward", "forward", "both"),
-            )
-            index += 2
-            continue
-        if token == "--depth":
-            depth = parse_depth(args[index + 1] if index + 1 < len(args) else None)
-            index += 2
-            continue
-        if token == "--format":
-            output_format = parse_format(
-                "--format",
-                args[index + 1] if index + 1 < len(args) else None,
-                ("text", "json"),
-            )
-            index += 2
-            continue
-        if token.startswith("-"):
-            raise AutoevolveError(f'Unknown option "{token}" for graph.')
-        if not ref:
-            ref = token
-            index += 1
-            continue
-        raise AutoevolveError(f'Unexpected argument "{token}" for graph.')
-    return GraphOptions(
-        depth=depth,
-        direction=direction,
-        edges=edges,
-        format=output_format,
-        ref=ref,
-    )
-
-
-def parse_compare_options(args: list[str]) -> CompareOptions:
-    output_format: ObjectOutputFormat = "text"
-    left_ref = ""
-    patch = False
-    right_ref = ""
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--format":
-            output_format = parse_format(
-                "--format",
-                args[index + 1] if index + 1 < len(args) else None,
-                ("text", "json"),
-            )
-            index += 2
-            continue
-        if token == "--patch":
-            patch = True
-            index += 1
-            continue
-        if token.startswith("-"):
-            raise AutoevolveError(f'Unknown option "{token}" for compare.')
-        if not left_ref:
-            left_ref = token
-            index += 1
-            continue
-        if not right_ref:
-            right_ref = token
-            index += 1
-            continue
-        raise AutoevolveError(f'Unexpected argument "{token}" for compare.')
-    return CompareOptions(
-        format=output_format,
-        left_ref=left_ref,
-        patch=patch,
-        right_ref=right_ref,
-    )
-
-
-def parse_show_options(args: list[str]) -> ShowOptions:
-    output_format: ObjectOutputFormat = "text"
-    ref = ""
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--format":
-            output_format = parse_format(
-                "--format",
-                args[index + 1] if index + 1 < len(args) else None,
-                ("text", "json"),
-            )
-            index += 2
-            continue
-        if token.startswith("-"):
-            raise AutoevolveError(f'Unknown option "{token}" for show.')
-        if not ref:
-            ref = token
-            index += 1
-            continue
-        raise AutoevolveError(f'Unexpected argument "{token}" for show.')
-    return ShowOptions(format=output_format, ref=ref)
 
 
 def format_worktree_state(worktree: dict[str, Any]) -> str:
@@ -611,7 +445,9 @@ def collect_graph(
     repo_root: str,
     records: list[ExperimentRecord],
     starting_sha: str,
-    options: GraphOptions,
+    edge_mode: GraphEdges,
+    traversal_direction: GraphDirection,
+    max_depth: int | None,
 ) -> dict[str, Any]:
     record_map = {record.sha: record for record in records}
     git_parent_map = build_git_parent_map(repo_root, records)
@@ -621,17 +457,17 @@ def collect_graph(
     node_order: list[str] = []
     seen_depth: dict[str, int] = {}
     edge_keys: set[str] = set()
-    edges: list[dict[str, Any]] = []
+    edge_list: list[dict[str, Any]] = []
 
     while queue:
-        depth, sha = queue.popleft()
+        current_depth, sha = queue.popleft()
         previous_depth = seen_depth.get(sha)
-        if previous_depth is not None and previous_depth <= depth:
+        if previous_depth is not None and previous_depth <= current_depth:
             continue
-        seen_depth[sha] = depth
+        seen_depth[sha] = current_depth
         node_order.append(sha)
 
-        if options.depth is not None and depth >= options.depth:
+        if max_depth is not None and current_depth >= max_depth:
             continue
 
         def enqueue(target_sha: str, next_depth: int) -> None:
@@ -645,25 +481,25 @@ def collect_graph(
             if edge_key in edge_keys:
                 return
             edge_keys.add(edge_key)
-            edges.append(edge)
+            edge_list.append(edge)
 
-        if should_include_graph_edge("git", options.edges) and options.direction in {
+        if should_include_graph_edge("git", edge_mode) and traversal_direction in {
             "backward",
             "both",
         }:
             for parent_sha in git_parent_map.get(sha, []):
                 add_edge({"from": sha, "kind": "git", "to": parent_sha})
-                enqueue(parent_sha, depth + 1)
+                enqueue(parent_sha, current_depth + 1)
 
-        if should_include_graph_edge("git", options.edges) and options.direction in {
+        if should_include_graph_edge("git", edge_mode) and traversal_direction in {
             "forward",
             "both",
         }:
             for child_sha in git_child_map.get(sha, []):
                 add_edge({"from": child_sha, "kind": "git", "to": sha})
-                enqueue(child_sha, depth + 1)
+                enqueue(child_sha, current_depth + 1)
 
-        if should_include_graph_edge("reference", options.edges) and options.direction in {
+        if should_include_graph_edge("reference", edge_mode) and traversal_direction in {
             "backward",
             "both",
         }:
@@ -677,9 +513,9 @@ def collect_graph(
                         "why": reference.why,
                     }
                 )
-                enqueue(reference.commit, depth + 1)
+                enqueue(reference.commit, current_depth + 1)
 
-        if should_include_graph_edge("reference", options.edges) and options.direction in {
+        if should_include_graph_edge("reference", edge_mode) and traversal_direction in {
             "forward",
             "both",
         }:
@@ -692,31 +528,29 @@ def collect_graph(
                         "why": incoming["why"],
                     }
                 )
-                enqueue(incoming["from"], depth + 1)
+                enqueue(incoming["from"], current_depth + 1)
 
-    return {"edges": edges, "nodeOrder": node_order}
+    return {"edges": edge_list, "nodeOrder": node_order}
 
 
-def run_status(args: list[str]) -> None:
+def run_status(output_format: ObjectOutputFormat = "text") -> None:
     repo_root = find_repo_root(os.getcwd())
     status = build_status_output(repo_root, get_experiment_records(repo_root))
-    options = parse_status_options(args)
-    if options.format == "json":
+    if output_format == "json":
         click.echo(json.dumps(status, indent=2))
         return
     print_status_output(status)
 
 
-def run_list(args: list[str]) -> None:
+def run_list(limit: int = 10) -> None:
     repo_root = find_repo_root(os.getcwd())
-    options = parse_list_options(args)
     records = apply_limit(
         sorted(
             get_experiment_records(repo_root),
             key=lambda record: record.date,
             reverse=True,
         ),
-        options.limit,
+        limit,
     )
     if not records:
         click.echo("No experiments found.")
@@ -727,29 +561,32 @@ def run_list(args: list[str]) -> None:
         print_list_record(record)
 
 
-def run_graph(args: list[str]) -> None:
-    options = parse_graph_options(args)
-    if not options.ref:
-        raise AutoevolveError("graph requires a git ref, for example: autoevolve graph HEAD")
+def run_graph(
+    ref: str,
+    edges: GraphEdges = "all",
+    direction: GraphDirection = "backward",
+    depth: int | None = 3,
+    output_format: ObjectOutputFormat = "text",
+) -> None:
     repo_root = find_repo_root(os.getcwd())
     records = get_experiment_records(repo_root)
     record_map = {record.sha: record for record in records}
-    starting_sha = resolve_ref(repo_root, options.ref)
+    starting_sha = resolve_ref(repo_root, ref)
     starting_record = record_map.get(starting_sha)
     if starting_record is None:
-        raise AutoevolveError(f"{options.ref} is not an experiment commit.")
-    graph = collect_graph(repo_root, records, starting_sha, options)
+        raise AutoevolveError(f"{ref} is not an experiment commit.")
+    graph = collect_graph(repo_root, records, starting_sha, edges, direction, depth)
     nodes = [build_experiment_output_by_sha(sha, record_map) for sha in graph["nodeOrder"]]
-    if options.format == "json":
+    if output_format == "json":
         click.echo(
             json.dumps(
                 {
-                    "depth": options.depth,
-                    "direction": options.direction,
+                    "depth": depth,
+                    "direction": direction,
                     "edges": graph["edges"],
-                    "mode": options.edges,
+                    "mode": edges,
                     "nodes": nodes,
-                    "ref": options.ref,
+                    "ref": ref,
                     "root": starting_sha,
                 },
                 indent=2,
@@ -758,9 +595,7 @@ def run_graph(args: list[str]) -> None:
         return
     click.echo(f"root: {short_sha(starting_sha)}  {starting_record.subject}")
     click.echo(
-        "mode: "
-        f"edges={options.edges} direction={options.direction} "
-        f"depth={options.depth if options.depth is not None else 'all'}"
+        f"mode: edges={edges} direction={direction} depth={depth if depth is not None else 'all'}"
     )
     click.echo("")
     click.echo("nodes:")
@@ -783,23 +618,23 @@ def run_graph(args: list[str]) -> None:
         )
 
 
-def run_compare(args: list[str]) -> None:
-    options = parse_compare_options(args)
-    if not options.left_ref or not options.right_ref:
-        raise AutoevolveError(
-            "compare requires two git refs, for example: autoevolve compare HEAD HEAD~1"
-        )
+def run_compare(
+    left_ref: str,
+    right_ref: str,
+    output_format: ObjectOutputFormat = "text",
+    patch: bool = False,
+) -> None:
     repo_root = find_repo_root(os.getcwd())
     records = get_experiment_records(repo_root)
     record_map = {record.sha: record for record in records}
-    left_sha = resolve_ref(repo_root, options.left_ref)
-    right_sha = resolve_ref(repo_root, options.right_ref)
+    left_sha = resolve_ref(repo_root, left_ref)
+    right_sha = resolve_ref(repo_root, right_ref)
     left_record = record_map.get(left_sha)
     right_record = record_map.get(right_sha)
     if left_record is None:
-        raise AutoevolveError(f"{options.left_ref} is not an experiment commit.")
+        raise AutoevolveError(f"{left_ref} is not an experiment commit.")
     if right_record is None:
-        raise AutoevolveError(f"{options.right_ref} is not an experiment commit.")
+        raise AutoevolveError(f"{right_ref} is not an experiment commit.")
     git_parent_map = build_git_parent_map(repo_root, records)
     git_relationship = describe_git_relationship(repo_root, left_sha, right_sha, git_parent_map)
     metric_diff = build_metric_diff(left_record, right_record)
@@ -810,8 +645,8 @@ def run_compare(args: list[str]) -> None:
         "right": build_parent_metric_delta(right_record, git_parent_map, record_map),
     }
     diffstat = run_git(repo_root, ["diff", "--shortstat", left_sha, right_sha]).strip()
-    patch = run_git(repo_root, ["diff", left_sha, right_sha]).rstrip() if options.patch else None
-    if options.format == "json":
+    patch_text = run_git(repo_root, ["diff", left_sha, right_sha]).rstrip() if patch else None
+    if output_format == "json":
         click.echo(
             json.dumps(
                 {
@@ -820,7 +655,7 @@ def run_compare(args: list[str]) -> None:
                     "git": git_relationship,
                     "left": build_experiment_object_for_output(left_record),
                     "metrics": metric_diff,
-                    "patch": patch,
+                    "patch": patch_text,
                     "parentDeltas": parent_deltas,
                     "references": reference_diff,
                     "right": build_experiment_object_for_output(right_record),
@@ -915,32 +750,29 @@ def run_compare(args: list[str]) -> None:
     click.echo("")
     click.echo(f"left summary:  {left_record.parsed.summary if left_record.parsed else '(none)'}")
     click.echo(f"right summary: {right_record.parsed.summary if right_record.parsed else '(none)'}")
-    if options.patch:
+    if patch:
         click.echo("")
         click.echo("patch:")
-        if not patch:
+        if not patch_text:
             click.echo("  (none)")
             return
-        click.echo(patch)
+        click.echo(patch_text)
 
 
-def run_show(args: list[str]) -> None:
-    options = parse_show_options(args)
-    if not options.ref:
-        raise AutoevolveError("show requires a git ref, for example: autoevolve show HEAD")
+def run_show(ref: str, output_format: ObjectOutputFormat = "text") -> None:
     repo_root = find_repo_root(os.getcwd())
-    journal = try_read_file_at_ref(repo_root, options.ref, ROOT_FILES.journal)
-    experiment_text = try_read_file_at_ref(repo_root, options.ref, ROOT_FILES.experiment)
+    journal = try_read_file_at_ref(repo_root, ref, ROOT_FILES.journal)
+    experiment_text = try_read_file_at_ref(repo_root, ref, ROOT_FILES.experiment)
     if journal is None and experiment_text is None:
         raise AutoevolveError(
-            f"{options.ref} does not contain {ROOT_FILES.journal} or {ROOT_FILES.experiment}"
+            f"{ref} does not contain {ROOT_FILES.journal} or {ROOT_FILES.experiment}"
         )
-    if options.format == "json":
+    if output_format == "json":
         parsed = parse_experiment_json(experiment_text) if experiment_text is not None else None
         click.echo(
             json.dumps(
                 {
-                    "ref": options.ref,
+                    "ref": ref,
                     "journal": journal,
                     "experiment": (
                         {

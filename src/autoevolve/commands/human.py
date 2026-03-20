@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from typing import Any
 
 import click
@@ -46,29 +45,23 @@ CODEX_CONTINUE_HOOK_COMMAND = (
 )
 
 
-@dataclass
-class InitOptions:
-    continue_hook: bool = False
-    constraints: str | None = None
-    goal: str | None = None
-    harness: str | None = None
-    metric: str | None = None
-    metric_description: str | None = None
-    mode: str | None = None
-    validation: str | None = None
-    yes: bool = False
-
-
-def has_explicit_problem_inputs(options: InitOptions) -> bool:
+def has_explicit_problem_inputs(
+    mode: str | None,
+    goal: str | None,
+    metric: str | None,
+    metric_description: str | None,
+    constraints: str | None,
+    validation: str | None,
+) -> bool:
     return any(
         value is not None
         for value in [
-            options.mode,
-            options.goal,
-            options.metric,
-            options.metric_description,
-            options.constraints,
-            options.validation,
+            mode,
+            goal,
+            metric,
+            metric_description,
+            constraints,
+            validation,
         ]
     )
 
@@ -81,76 +74,6 @@ def require_filled_value(value: str, field_name: str) -> str:
             "if the problem is not ready yet."
         )
     return trimmed
-
-
-def parse_init_options(args: list[str]) -> InitOptions:
-    options = InitOptions()
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if not token.startswith("--") and options.harness is None:
-            if token not in SUPPORTED_HARNESSES:
-                raise AutoevolveError(f'Unsupported harness "{token}"')
-            options.harness = token
-            index += 1
-            continue
-
-        if token == "--harness":
-            harness = args[index + 1] if index + 1 < len(args) else ""
-            if harness not in SUPPORTED_HARNESSES:
-                raise AutoevolveError(f'Unsupported harness "{harness}"')
-            options.harness = harness
-            index += 2
-            continue
-
-        if token == "--mode":
-            mode = args[index + 1] if index + 1 < len(args) else ""
-            if mode not in {"now", "scaffold"}:
-                raise AutoevolveError(f'Unsupported init mode "{mode}"')
-            options.mode = mode
-            index += 2
-            continue
-
-        if token == "--yes":
-            options.yes = True
-            index += 1
-            continue
-
-        if token == "--continue-hook":
-            options.continue_hook = True
-            index += 1
-            continue
-
-        if token == "--goal":
-            options.goal = args[index + 1] if index + 1 < len(args) else ""
-            index += 2
-            continue
-
-        if token == "--metric":
-            options.metric = args[index + 1] if index + 1 < len(args) else ""
-            index += 2
-            continue
-
-        if token == "--metric-description":
-            options.metric_description = args[index + 1] if index + 1 < len(args) else ""
-            index += 2
-            continue
-
-        if token == "--validation":
-            options.validation = args[index + 1] if index + 1 < len(args) else ""
-            index += 2
-            continue
-
-        if token == "--constraints":
-            options.constraints = args[index + 1] if index + 1 < len(args) else ""
-            index += 2
-            continue
-
-        if token.startswith("--"):
-            raise AutoevolveError(f'Unknown option "{token}" for init.')
-        raise AutoevolveError(f'Unexpected argument "{token}" for init.')
-
-    return options
 
 
 def print_post_init_summary(
@@ -436,72 +359,89 @@ def write_continue_hook_files(
     return []
 
 
-def run_init(args: list[str]) -> None:
+def run_init(
+    harness: str | None = None,
+    mode: str | None = None,
+    goal: str | None = None,
+    metric: str | None = None,
+    metric_description: str | None = None,
+    constraints: str | None = None,
+    validation: str | None = None,
+    continue_hook: bool = False,
+    yes: bool = False,
+) -> None:
     repo_root = find_repo_root(os.getcwd())
-    options = parse_init_options(args)
 
-    confirm_write(repo_root, options.yes)
+    confirm_write(repo_root, yes)
 
-    harness = options.harness or choose_harness("claude")
-    if options.continue_hook and not supports_continue_hook(harness):
-        raise AutoevolveError(f'Continue hooks are not supported for harness "{harness}".')
+    selected_harness = harness or choose_harness("claude")
+    if continue_hook and not supports_continue_hook(selected_harness):
+        raise AutoevolveError(f'Continue hooks are not supported for harness "{selected_harness}".')
 
-    continue_hook = supports_continue_hook(harness) and (
-        options.continue_hook or (not options.yes and choose_continue_hook(harness))
+    continue_hook = supports_continue_hook(selected_harness) and (
+        continue_hook or (not yes and choose_continue_hook(selected_harness))
     )
 
-    prompt_text = build_harness_prompt(harness)
+    prompt_text = build_harness_prompt(selected_harness)
     existing_problem_path = resolve_repo_path(repo_root, ROOT_FILES.problem)
     has_existing_problem = os.path.exists(existing_problem_path)
     keep_existing_problem = (
         has_existing_problem
-        and not has_explicit_problem_inputs(options)
-        and (True if options.yes else choose_keep_existing_problem())
+        and not has_explicit_problem_inputs(
+            mode,
+            goal,
+            metric,
+            metric_description,
+            constraints,
+            validation,
+        )
+        and (True if yes else choose_keep_existing_problem())
     )
 
-    mode = None if keep_existing_problem else (options.mode or choose_setup_mode("now"))
-    goal = ""
-    metric = ""
-    metric_description = ""
-    constraints = ""
-    validation = ""
+    selected_mode = None if keep_existing_problem else (mode or choose_setup_mode("now"))
+    selected_goal = ""
+    selected_metric = ""
+    selected_metric_description = ""
+    selected_constraints = ""
+    selected_validation = ""
 
-    if mode == "now":
-        goal = require_filled_value(options.goal or ask_goal(""), "goal")
-        metric = require_filled_value(options.metric or ask_metric_spec(""), "metric")
+    if selected_mode == "now":
+        selected_goal = require_filled_value(goal or ask_goal(""), "goal")
+        selected_metric = require_filled_value(metric or ask_metric_spec(""), "metric")
         try:
-            parse_primary_metric_spec(metric)
+            parse_primary_metric_spec(selected_metric)
         except ValueError as error:
             raise AutoevolveError(str(error)) from error
-        metric_description = (
-            options.metric_description
-            if options.metric_description is not None
-            else (ask_metric_description("") if options.metric is None else "")
+        selected_metric_description = (
+            metric_description
+            if metric_description is not None
+            else (ask_metric_description("") if metric is None else "")
         )
-        constraints = (
-            options.constraints if options.constraints is not None else ask_constraints("")
+        selected_constraints = constraints if constraints is not None else ask_constraints("")
+        selected_validation = require_filled_value(
+            validation or ask_validation(""),
+            "validation",
         )
-        validation = require_filled_value(options.validation or ask_validation(""), "validation")
 
     problem_template = (
         None
         if keep_existing_problem
         else build_problem_template(
             ProblemTemplateOptions(
-                constraints=constraints,
-                goal=goal,
-                metric=metric,
-                metric_description=metric_description,
-                validation=validation,
+                constraints=selected_constraints,
+                goal=selected_goal,
+                metric=selected_metric,
+                metric_description=selected_metric_description,
+                validation=selected_validation,
             )
         )
     )
 
-    prompt_path = HARNESS_PATHS[harness]
-    harness_extra_files = get_continue_hook_files(harness) if continue_hook else []
+    prompt_path = HARNESS_PATHS[selected_harness]
+    harness_extra_files = get_continue_hook_files(selected_harness) if continue_hook else []
     planned_write_files = [prompt_path, *harness_extra_files]
 
-    review_lines = [f"Harness: {harness}"]
+    review_lines = [f"Harness: {selected_harness}"]
     if continue_hook:
         review_lines.append("Continue hook: enabled")
     if keep_existing_problem:
@@ -511,13 +451,14 @@ def run_init(args: list[str]) -> None:
         )
     else:
         review_lines.append(
-            f"Mode: {'Set up now' if mode == 'now' else 'Scaffold and finish with my agent'}"
+            "Mode: "
+            f"{'Set up now' if selected_mode == 'now' else 'Scaffold and finish with my agent'}"
         )
         review_lines.append(f"Files: {', '.join([ROOT_FILES.problem, *planned_write_files])}")
     click.echo("Review")
     click.echo("\n".join(review_lines))
 
-    if not options.yes and not click.confirm("Write these files?", default=True):
+    if not yes and not click.confirm("Write these files?", default=True):
         raise SystemExit(0)
 
     wrote_problem = (
@@ -527,17 +468,17 @@ def run_init(args: list[str]) -> None:
             repo_root,
             ROOT_FILES.problem,
             problem_template,
-            options.yes,
+            yes,
         )
     )
     wrote_prompt = write_file_with_confirmation(
         repo_root,
         prompt_path,
         prompt_text,
-        options.yes,
+        yes,
     )
     wrote_harness_extras = (
-        write_continue_hook_files(repo_root, harness, options.yes) if continue_hook else []
+        write_continue_hook_files(repo_root, selected_harness, yes) if continue_hook else []
     )
 
     written_files: list[str] = []
@@ -548,7 +489,7 @@ def run_init(args: list[str]) -> None:
     written_files.extend(wrote_harness_extras)
 
     click.echo("Autoevolve initialized.")
-    if mode == "scaffold":
+    if selected_mode == "scaffold":
         print_post_init_summary(
             repo_root,
             written_files,

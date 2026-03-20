@@ -281,33 +281,33 @@ For example:
 
     top_help = run([], cwd=repo_path)
     assert top_help.stdout == snapshot("""\
-autoevolve
+Usage: autoevolve [OPTIONS] COMMAND [ARGS]...
 
-Git-backed experiment loops for coding agents.
+  Git-backed experiment loops for coding agents.
 
-Usage:
-  autoevolve <command> [options]
+Options:
+  --help  Show this message and exit.
 
 Human:
-  init        Scaffold PROBLEM.md and agent instructions.
-  validate    Validate that the repo is correctly initialized for autoevolve.
+  init      Scaffold PROBLEM.md and agent instructions.
+  validate  Validate that the repo is correctly initialized for autoevolve.
 
 Lifecycle:
-  start       Create a managed experiment branch and worktree.
-  record      Validate, commit, and remove the current managed worktree.
-  clean       Remove stale managed worktrees for this repository.
+  start   Create a managed experiment branch and worktree.
+  record  Validate, commit, and remove the current managed worktree.
+  clean   Remove stale managed worktrees for this repository.
 
 Inspect:
-  status      Show the current experiment snapshot.
-  list        List recent experiments.
-  show        Show JOURNAL.md and EXPERIMENT.json for one ref.
-  compare     Compare two experiment commits.
-  graph       Traverse lineage around one ref.
+  status   Show the current experiment snapshot.
+  list     List recent experiments.
+  show     Show JOURNAL.md and EXPERIMENT.json for one ref.
+  compare  Compare two experiment commits.
+  graph    Traverse lineage around one ref.
 
 Analytics:
-  recent      Return the most recent experiments.
-  best        Return the top experiments for one objective.
-  pareto      Return the Pareto frontier for the selected objectives.
+  recent  Return the most recent experiments.
+  best    Return the top experiments for one objective.
+  pareto  Return the Pareto frontier for the selected objectives.
 
 Examples:
   autoevolve init

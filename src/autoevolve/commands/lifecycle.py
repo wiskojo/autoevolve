@@ -19,7 +19,6 @@ from autoevolve.commands.shared import (
     list_autoevolve_branches,
     list_repo_worktrees,
     normalize_managed_experiment_name,
-    parse_ref_value,
     resolve_git_path,
     resolve_managed_worktree_path,
     resolve_new_experiment_base_ref,
@@ -28,77 +27,14 @@ from autoevolve.commands.shared import (
 from autoevolve.constants import MANAGED_WORKTREE_ROOT, ROOT_FILES
 from autoevolve.errors import AutoevolveError
 from autoevolve.gittools import find_repo_root, run_git, run_git_with_git_dir
-from autoevolve.models import CleanOptions, StartOptions
 from autoevolve.utils import parse_experiment_json, read_text_file, resolve_repo_path, short_sha
 
 
-def parse_start_options(args: list[str]) -> StartOptions:
-    from_ref = ""
-    name = ""
-    summary = ""
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--from":
-            from_ref = parse_ref_value("--from", args[index + 1] if index + 1 < len(args) else None)
-            index += 2
-            continue
-        if token.startswith("-"):
-            raise AutoevolveError(f'Unknown option "{token}" for start.')
-        if not name:
-            name = token.strip()
-            index += 1
-            continue
-        if not summary:
-            summary = token.strip()
-            index += 1
-            continue
-        raise AutoevolveError(f'Unexpected argument "{token}" for start.')
-
-    if not name:
-        raise AutoevolveError(
-            "start requires an experiment name and summary, for example: "
-            'autoevolve start tune-thresholds "Try a tighter threshold sweep"'
-        )
-    if not summary:
-        raise AutoevolveError(
-            "start requires an experiment summary, for example: "
-            'autoevolve start tune-thresholds "Try a tighter threshold sweep"'
-        )
-    return StartOptions(from_ref=from_ref, name=name, summary=summary)
-
-
-def parse_record_args(args: list[str]) -> None:
-    if args:
-        raise AutoevolveError(f'Unexpected argument "{args[0]}" for record.')
-
-
-def parse_clean_options(args: list[str]) -> CleanOptions:
-    force = False
-    name = ""
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token in {"-f", "--force"}:
-            force = True
-            index += 1
-            continue
-        if token.startswith("-"):
-            raise AutoevolveError(f'Unknown option "{token}" for clean.')
-        if not name:
-            name = token.strip()
-            index += 1
-            continue
-        raise AutoevolveError(f'Unexpected argument "{token}" for clean.')
-    return CleanOptions(force=force, name=name)
-
-
-def run_start(args: list[str]) -> None:
-    options = parse_start_options(args)
+def run_start(name: str, summary: str, from_ref: str | None = None) -> None:
     repo_root = find_repo_root(os.getcwd())
-    base_ref = resolve_new_experiment_base_ref(repo_root, options.from_ref)
-    branch_name = f"{MANAGED_EXPERIMENT_BRANCH_PREFIX}{options.name}"
-    worktree_path = resolve_managed_worktree_path(options.name)
+    base_ref = resolve_new_experiment_base_ref(repo_root, from_ref or "")
+    branch_name = f"{MANAGED_EXPERIMENT_BRANCH_PREFIX}{name}"
+    worktree_path = resolve_managed_worktree_path(name)
     validate_managed_branch_name(repo_root, branch_name)
     if any(branch["name"] == branch_name for branch in list_autoevolve_branches(repo_root)):
         raise AutoevolveError(f'Branch "{branch_name}" already exists.')
@@ -112,18 +48,17 @@ def run_start(args: list[str]) -> None:
     with open(
         resolve_repo_path(worktree_path, ROOT_FILES.journal), "w", encoding="utf-8"
     ) as handle:
-        handle.write(build_journal_stub(options.name))
+        handle.write(build_journal_stub(name))
     with open(
         resolve_repo_path(worktree_path, ROOT_FILES.experiment), "w", encoding="utf-8"
     ) as handle:
-        handle.write(build_experiment_stub(options.summary))
+        handle.write(build_experiment_stub(summary))
     click.echo(f"Branch: {branch_name}")
     click.echo(f"Base: {base_ref['ref']}")
     click.echo(f"Path: {worktree_path}")
 
 
-def run_record(args: list[str]) -> None:
-    parse_record_args(args)
+def run_record() -> None:
     repo_root = find_repo_root(os.getcwd())
     branch_name = run_git(repo_root, ["branch", "--show-current"]).strip()
     if not branch_name:
@@ -171,13 +106,12 @@ def run_record(args: list[str]) -> None:
     click.echo(f"Removed worktree: {resolved_repo_root}")
 
 
-def run_clean(args: list[str]) -> None:
-    options = parse_clean_options(args)
+def run_clean(name: str | None = None, force: bool = False) -> None:
     repo_root = find_repo_root(os.getcwd())
     target_worktrees: list[dict[str, Any]] = []
     target_experiment_name = ""
-    if options.name:
-        target_experiment_name = normalize_managed_experiment_name(options.name)
+    if name:
+        target_experiment_name = normalize_managed_experiment_name(name)
         target_worktree = find_repo_worktree_by_path(
             repo_root, resolve_managed_worktree_path(target_experiment_name)
         )
@@ -203,7 +137,7 @@ def run_clean(args: list[str]) -> None:
     blocked_worktrees = [
         worktree for worktree in target_worktrees if worktree["isMissing"] or worktree["dirty"]
     ]
-    if not options.force and blocked_worktrees:
+    if not force and blocked_worktrees:
         reason = (
             "Refusing to remove a dirty or missing linked worktree without --force:"
             if len(blocked_worktrees) == 1
@@ -232,7 +166,7 @@ def run_clean(args: list[str]) -> None:
                 pruned_missing_worktrees = True
             continue
         remove_args = ["worktree", "remove"]
-        if options.force or worktree["dirty"]:
+        if force or worktree["dirty"]:
             remove_args.append("--force")
         remove_args.append(worktree["path"])
         run_git_with_git_dir(os.path.expanduser("~"), common_git_dir, remove_args)
