@@ -1,0 +1,38 @@
+[
+  {
+    "name": "balanced",
+    "features": {
+      "freshness": 0.6,
+      "relevance": 0.7,
+      "cost": 0.4
+    },
+    "target": 0.66
+  },
+  {
+    "name": "cheap",
+    "features": {
+      "freshness": 0.3,
+      "relevance": 0.8,
+      "cost": 0.1
+    },
+    "target": 0.69
+  },
+  {
+    "name": "premium",
+    "features": {
+      "freshness": 0.9,
+      "relevance": 0.75,
+      "cost": 0.85
+    },
+    "target": 0.66
+  },
+  {
+    "name": "stale",
+    "features": {
+      "freshness": 0.1,
+      "relevance": 0.35,
+      "cost": 0.2
+    },
+    "target": 0.26
+  }
+]
