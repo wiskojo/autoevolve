@@ -281,21 +281,21 @@ Human:
   validate  Validate that the repo is correctly initialized for autoevolve.
 
 Lifecycle:
-  start   Create a managed experiment branch and worktree.
-  record  Validate, commit, and remove the current managed worktree.
-  clean   Remove stale managed worktrees for this repository.
+  start     Create a managed experiment branch and worktree.
+  record    Validate, commit, and remove the current managed worktree.
+  clean     Remove stale managed worktrees for this repository.
 
 Inspect:
-  status   Show the current experiment status.
-  log      Show experiment logs.
-  show     Show experiment details.
-  compare  Compare two experiments.
-  lineage  Traverse experiment lineage.
+  status    Show the current experiment status.
+  log       Show experiment logs.
+  show      Show experiment details.
+  compare   Compare two experiments.
+  lineage   Traverse experiment lineage.
 
 Analytics:
-  recent  Return the most recent experiments.
-  best    Return the top experiments for one metric.
-  pareto  Return the Pareto frontier for the selected metrics.
+  recent    Return the most recent experiments.
+  best      Return the top experiments for one metric.
+  pareto    Return the Pareto frontier for the selected metrics.
 
 Examples:
   autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844

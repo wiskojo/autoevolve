@@ -86,13 +86,17 @@ class AutoevolveGroup(click.Group):
 
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         sections: dict[str, list[tuple[str, str]]] = {}
-        for command_name in self.list_commands(ctx):
+        command_names = self.list_commands(ctx)
+        command_width = max((len(command_name) for command_name in command_names), default=0)
+        for command_name in command_names:
             command = self.get_command(ctx, command_name)
             if command is None or command.hidden:
                 continue
             section = command.section if isinstance(command, SectionedCommand) else "Other"
             rows = sections.setdefault(section, [])
-            rows.append((command_name, command.get_short_help_str(formatter.width)))
+            rows.append(
+                (command_name.ljust(command_width), command.get_short_help_str(formatter.width))
+            )
 
         for title, rows in sections.items():
             if not rows:
