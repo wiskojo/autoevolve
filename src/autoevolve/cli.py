@@ -18,6 +18,7 @@ from autoevolve.commands.inspect import (
 from autoevolve.commands.lifecycle import run_clean, run_record, run_start
 from autoevolve.constants import (
     MANAGED_WORKTREE_ROOT,
+    ROOT_FILES,
     format_home_relative_path,
 )
 from autoevolve.errors import AutoevolveError
@@ -126,22 +127,13 @@ def cli(ctx: click.Context) -> None:
     short_help="Scaffold PROBLEM.md and agent instructions.",
     help=(
         "Scaffold PROBLEM.md and agent instructions.\n\n"
-        "If no harness is provided, init prompts for one. Use --yes to skip confirmation "
-        "prompts and write files immediately."
+        f"If {ROOT_FILES.problem} does not exist, init writes a stub. If it already exists, "
+        "init leaves it unchanged. If no harness is provided, init prompts for one. "
+        "Use --yes to skip confirmation prompts and write files immediately."
     ),
 )
 @click.argument("harness_arg", required=False, type=click.Choice(HARNESS_NAMES))
 @click.option("--harness", type=click.Choice(HARNESS_NAMES), help="Target agent harness.")
-@click.option(
-    "--mode",
-    type=click.Choice(("now", "scaffold")),
-    help="Problem setup mode.",
-)
-@click.option("--goal", help="Goal for the problem definition.")
-@click.option("--metric", help="Primary metric spec, for example: 'max benchmark_score'.")
-@click.option("--metric-description", help="Optional explanation for the primary metric.")
-@click.option("--constraints", help="Constraints or non-goals.")
-@click.option("--validation", help="Validation command or procedure.")
 @click.option(
     "--continue-hook",
     is_flag=True,
@@ -151,12 +143,6 @@ def cli(ctx: click.Context) -> None:
 def init_command(
     harness_arg: str | None,
     harness: str | None,
-    mode: str | None,
-    goal: str | None,
-    metric: str | None,
-    metric_description: str | None,
-    constraints: str | None,
-    validation: str | None,
     continue_hook: bool,
     yes: bool,
 ) -> None:
@@ -165,12 +151,6 @@ def init_command(
     selected_harness = harness if harness is not None else harness_arg
     run_init(
         harness=parse_harness(selected_harness) if selected_harness is not None else None,
-        mode=mode,
-        goal=goal,
-        metric=metric,
-        metric_description=metric_description,
-        constraints=constraints,
-        validation=validation,
         continue_hook=continue_hook,
         yes=yes,
     )

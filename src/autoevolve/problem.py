@@ -5,7 +5,6 @@ from typing import cast
 
 from autoevolve.models import MetricDirection, PrimaryMetricSpec
 
-PRIMARY_METRIC_SPEC_EXAMPLE = "max benchmark_score"
 PRIMARY_METRIC_SPEC_PATTERN = re.compile(r"^(max|min)\s+([A-Za-z_][A-Za-z0-9_.-]*)$")
 
 
@@ -25,23 +24,6 @@ def extract_markdown_section(text: str, heading: str) -> str | None:
             break
         section_lines.append(line)
     return "\n".join(section_lines)
-
-
-def build_primary_metric_init_note() -> str:
-    return "\n".join(
-        [
-            "Define the primary metric in two parts:",
-            "1. First non-empty line: `max <metric>` or `min <metric>`",
-            (
-                "2. Optional: provide a natural language description of what "
-                "we're trying to optimize."
-            ),
-            "",
-            "Example:",
-            PRIMARY_METRIC_SPEC_EXAMPLE,
-            "Maximize the ranking quality on the benchmark set.",
-        ]
-    )
 
 
 def build_problem_metric_section(metric_spec: str, metric_description: str) -> str:

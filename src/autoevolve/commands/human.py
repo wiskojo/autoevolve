@@ -13,17 +13,8 @@ from autoevolve.harnesses import (
     Harness,
     get_harness_spec,
 )
-from autoevolve.problem import (
-    PRIMARY_METRIC_SPEC_EXAMPLE,
-    build_primary_metric_init_note,
-    parse_primary_metric_spec,
-    parse_problem_primary_metric,
-)
-from autoevolve.prompt import (
-    ProblemTemplateOptions,
-    build_harness_prompt,
-    build_problem_template,
-)
+from autoevolve.problem import parse_problem_primary_metric
+from autoevolve.prompt import ProblemTemplateOptions, build_harness_prompt, build_problem_template
 from autoevolve.utils import (
     file_exists,
     find_prompt_files,
@@ -33,16 +24,6 @@ from autoevolve.utils import (
     resolve_repo_path,
     write_text_file,
 )
-
-
-def require_filled_value(value: str, field_name: str) -> str:
-    trimmed = value.strip()
-    if not trimmed:
-        raise AutoevolveError(
-            f"Missing {field_name} for `Set up now`. Choose scaffold mode "
-            "if the problem is not ready yet."
-        )
-    return trimmed
 
 
 def print_post_init_summary(
@@ -71,24 +52,6 @@ def choose_harness(initial_value: Harness) -> Harness:
         show_choices=False,
     )
     return Harness(str(choice))
-
-
-def choose_setup_mode(initial_value: str) -> str:
-    click.echo("Problem Setup")
-    click.echo(
-        "Choose `Set up now` only if you already know the goal, metric, "
-        "constraints, and validation."
-    )
-    click.echo(
-        "If you do not have that ready yet, scaffold a stub and finish it with your coding agent."
-    )
-    choice = click.prompt(
-        "How do you want to set up the problem? [now/scaffold]",
-        type=click.Choice(["now", "scaffold"]),
-        default=initial_value,
-        show_choices=False,
-    )
-    return str(choice)
 
 
 def choose_continue_hook(harness: Harness) -> bool:
@@ -138,12 +101,6 @@ def write_continue_hook_files(
 
 def run_init(
     harness: Harness | None = None,
-    mode: str | None = None,
-    goal: str | None = None,
-    metric: str | None = None,
-    metric_description: str | None = None,
-    constraints: str | None = None,
-    validation: str | None = None,
     continue_hook: bool = False,
     yes: bool = False,
 ) -> None:
@@ -165,92 +122,18 @@ def run_init(
 
     prompt_text = build_harness_prompt(selected_harness)
     existing_problem_path = resolve_repo_path(repo_root, ROOT_FILES.problem)
-    has_existing_problem = os.path.exists(existing_problem_path)
-    has_problem_inputs = any(
-        value is not None
-        for value in [mode, goal, metric, metric_description, constraints, validation]
-    )
-    keep_existing_problem = (
-        has_existing_problem
-        and not has_problem_inputs
-        and (yes or click.confirm(f"Keep the existing {ROOT_FILES.problem}?", default=True))
-    )
-
-    selected_mode = None if keep_existing_problem else (mode or choose_setup_mode("now"))
-    selected_goal = ""
-    selected_metric = ""
-    selected_metric_description = ""
-    selected_constraints = ""
-    selected_validation = ""
-
-    if selected_mode == "now":
-        selected_goal = require_filled_value(
-            goal or str(click.prompt("Goal", default="", show_default=False)),
-            "goal",
-        )
-        if metric is not None:
-            selected_metric = require_filled_value(metric, "metric")
-        else:
-            click.echo("Metric Format")
-            click.echo(build_primary_metric_init_note())
-            selected_metric = require_filled_value(
-                str(
-                    click.prompt(
-                        "Metric spec",
-                        default=PRIMARY_METRIC_SPEC_EXAMPLE,
-                        show_default=False,
-                    )
-                ),
-                "metric",
-            )
-        try:
-            parse_primary_metric_spec(selected_metric)
-        except ValueError as error:
-            raise AutoevolveError(str(error)) from error
-        selected_metric_description = (
-            metric_description
-            if metric_description is not None
-            else (
-                str(
-                    click.prompt(
-                        "Metric description (optional)",
-                        default="",
-                        show_default=False,
-                    )
-                ).strip()
-                if metric is None
-                else ""
-            )
-        )
-        selected_constraints = (
-            constraints
-            if constraints is not None
-            else str(
-                click.prompt(
-                    "Constraints or non-goals",
-                    default="",
-                    show_default=False,
-                )
-            ).strip()
-        )
-        selected_validation = require_filled_value(
-            validation or str(click.prompt("Validation", default="", show_default=False)),
-            "validation",
-        )
-
-    problem_template = (
-        None
-        if keep_existing_problem
-        else build_problem_template(
+    keep_existing_problem = os.path.exists(existing_problem_path)
+    problem_template = None
+    if not keep_existing_problem:
+        problem_template = build_problem_template(
             ProblemTemplateOptions(
-                constraints=selected_constraints,
-                goal=selected_goal,
-                metric=selected_metric,
-                metric_description=selected_metric_description,
-                validation=selected_validation,
+                constraints="",
+                goal="",
+                metric="",
+                metric_description="",
+                validation="",
             )
         )
-    )
 
     prompt_path = harness_spec.prompt_path
     harness_extra_files = (
@@ -267,10 +150,6 @@ def run_init(
             f"Files: keep {ROOT_FILES.problem}, write {', '.join(planned_write_files)}"
         )
     else:
-        review_lines.append(
-            "Mode: "
-            f"{'Set up now' if selected_mode == 'now' else 'Scaffold and finish with my agent'}"
-        )
         review_lines.append(f"Files: {', '.join([ROOT_FILES.problem, *planned_write_files])}")
     click.echo("Review")
     click.echo("\n".join(review_lines))
@@ -306,20 +185,11 @@ def run_init(
     written_files.extend(wrote_harness_extras)
 
     click.echo("Autoevolve initialized.")
-    if selected_mode == "scaffold":
-        print_post_init_summary(
-            repo_root,
-            written_files,
-            "ask your agent to finish setup.",
-            "Follow the setup instructions for autoevolve.",
-        )
-        return
-
     print_post_init_summary(
         repo_root,
         written_files,
-        "ask your agent to verify setup and begin the experiment loop.",
-        "Start autoevolve.",
+        "ask your agent to finish setup.",
+        "Follow the setup instructions for autoevolve.",
     )
 
 
