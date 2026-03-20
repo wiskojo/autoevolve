@@ -273,6 +273,3 @@ def run_pareto(args: list[str]) -> None:
     print_set_header(options.format)
     for record in records:
         print_set_record(record, options.format)
-
-
-__all__ = ["run_best", "run_pareto", "run_recent"]

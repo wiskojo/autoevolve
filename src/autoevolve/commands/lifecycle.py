@@ -247,6 +247,3 @@ def run_clean(args: list[str]) -> None:
         click.echo(f"Experiment: {target_experiment_name}")
     for worktree in target_worktrees:
         click.echo(f"  {describe_worktree_for_removal(worktree)}")
-
-
-__all__ = ["run_clean", "run_record", "run_start"]

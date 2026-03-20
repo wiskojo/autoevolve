@@ -779,6 +779,3 @@ def run_show(args: list[str]) -> None:
             click.echo("")
         click.echo(f"# {ROOT_FILES.experiment}")
         click.echo(experiment_text.rstrip())
-
-
-__all__ = ["run_compare", "run_graph", "run_list", "run_show", "run_status"]
