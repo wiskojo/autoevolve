@@ -609,47 +609,6 @@ def build_changed_paths(repo_root: str, left_sha: str, right_sha: str) -> list[d
     return changed_paths
 
 
-def build_parent_metric_delta(
-    record: ExperimentRecord,
-    git_parent_map: dict[str, list[str]],
-    record_map: dict[str, ExperimentRecord],
-) -> dict[str, Any] | None:
-    parents = git_parent_map.get(record.sha, [])
-    if len(parents) != 1:
-        return None
-    parent_sha = parents[0]
-    parent_record = record_map.get(parent_sha)
-    if parent_record is None:
-        return None
-    metric_names = set(
-        parent_record.parsed.metrics.keys()
-        if parent_record.parsed and parent_record.parsed.metrics
-        else []
-    )
-    if record.parsed and record.parsed.metrics:
-        metric_names.update(record.parsed.metrics.keys())
-    metrics: dict[str, Any] = {}
-    for metric in metric_names:
-        parent_value = (
-            parent_record.parsed.metrics.get(metric)
-            if parent_record.parsed and parent_record.parsed.metrics
-            else None
-        )
-        current_value = (
-            record.parsed.metrics.get(metric) if record.parsed and record.parsed.metrics else None
-        )
-        if not is_number(parent_value) or not is_number(current_value):
-            continue
-        metrics[metric] = {
-            "current": current_value,
-            "delta": current_value - parent_value,
-            "parent": parent_value,
-        }
-    if not metrics:
-        return None
-    return {"metrics": metrics, "parent": parent_sha}
-
-
 def build_metric_diff(left: ExperimentRecord, right: ExperimentRecord) -> dict[str, Any]:
     metric_names = set(left.parsed.metrics.keys() if left.parsed and left.parsed.metrics else [])
     if right.parsed and right.parsed.metrics:
@@ -1078,11 +1037,7 @@ def run_lineage(
         )
 
 
-def run_compare(
-    left_ref: str,
-    right_ref: str,
-    patch: bool = False,
-) -> None:
+def run_compare(left_ref: str, right_ref: str) -> None:
     repo_root = find_repo_root(os.getcwd())
     records = get_experiment_records(repo_root)
     record_map = {record.sha: record for record in records}
@@ -1099,10 +1054,6 @@ def run_compare(
     metric_diff = build_metric_diff(left_record, right_record)
     reference_diff = build_reference_diff(left_record, right_record)
     changed_paths = build_changed_paths(repo_root, left_sha, right_sha)
-    parent_deltas = {
-        "left": build_parent_metric_delta(left_record, git_parent_map, record_map),
-        "right": build_parent_metric_delta(right_record, git_parent_map, record_map),
-    }
     diffstat = run_git(
         repo_root,
         ["diff", "--shortstat", left_sha, right_sha, *code_diff_pathspec_args()],
@@ -1179,25 +1130,10 @@ def run_compare(
         )
     )
     click.echo("")
-    click.echo("parent deltas:")
-    if not parent_deltas["left"] and not parent_deltas["right"]:
-        click.echo("  (none)")
-    else:
-        for label in ("left", "right"):
-            delta = parent_deltas[label]
-            if not delta:
-                continue
-            click.echo(f"  {label} vs {short_sha(delta['parent'])}:")
-            for metric in sorted(delta["metrics"].keys()):
-                entry = delta["metrics"][metric]
-                click.echo(
-                    f"    {metric}: {entry['parent']} -> {entry['current']} ({entry['delta']:+g})"
-                )
-    click.echo("")
     click.echo(f"left summary:  {left_record.parsed.summary if left_record.parsed else '(none)'}")
     click.echo(f"right summary: {right_record.parsed.summary if right_record.parsed else '(none)'}")
     click.echo("")
-    click.echo("patch:" if patch else "code diff:")
+    click.echo("code diff:")
     if not diff_text:
         click.echo("  (none)")
         return

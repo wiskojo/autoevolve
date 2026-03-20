@@ -279,15 +279,14 @@ def show_command(ref: str) -> None:
     short_help="Compare two experiments.",
     help=(
         "Compare two experiments.\n\n"
-        "compare shows commit metadata, summaries, metrics, lineage "
-        "relationship, and the git diff between two recorded experiments."
+        "compare shows commit metadata, summaries, metrics, references, and "
+        "the git diff between two recorded experiments."
     ),
 )
 @click.argument("left_ref")
 @click.argument("right_ref")
-@click.option("--patch", is_flag=True, help="Include the git patch.")
-def compare_command(left_ref: str, right_ref: str, patch: bool) -> None:
-    run_compare(left_ref, right_ref, patch)
+def compare_command(left_ref: str, right_ref: str) -> None:
+    run_compare(left_ref, right_ref)
 
 
 @cli.command(

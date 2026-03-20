@@ -863,20 +863,12 @@ references:
   left only: (none)
   right only: <SHA_4>
 
-parent deltas:
-  left vs <SHA_5>:
-    benchmark_score: 0.901 -> 0.913 (+0.012)
-    runtime_sec: 1.12 -> 1.03 (-0.09)
-  right vs <SHA_1>:
-    benchmark_score: 0.913 -> 0.918 (+0.005)
-    runtime_sec: 1.03 -> 1.08 (+0.05)
-
 left summary:  Balanced v2 combined island A's score gains with island C's premium guard and became the best single-island result.
 right summary: Hybrid final is the best synthetic experiment and explicitly combines ideas from multiple islands.
 
 code diff:
 diff --git a/src/ranker.py b/src/ranker.py
-index <SHA_6>..<SHA_7> 100644
+index <SHA_5>..<SHA_6> 100644
 --- a/src/ranker.py
 +++ b/src/ranker.py
 @@ -1,5 +1,5 @@
@@ -894,9 +886,9 @@ index <SHA_6>..<SHA_7> 100644
     compare_patch = run(
         ["compare", "island-a/balanced-v2", "cross/hybrid-final", "--patch"],
         cwd=repo_path,
+        expect_failure=True,
     )
-    assert "\npatch:\n" in compare_patch.stdout
-    assert re.search(r"^diff --git a/src/ranker\.py b/src/ranker\.py", compare_patch.stdout, re.M)
+    assert_click_error(compare_patch.stderr, "No such option: --patch")
 
     sibling_compare = run(
         [
