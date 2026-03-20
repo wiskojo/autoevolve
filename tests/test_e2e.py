@@ -254,7 +254,7 @@ Files written:
 Next: ask your agent to finish setup.
 
 For example:
-  Follow the setup instructions for autoevolve.
+  Read PROGRAM.md and start working.
 """
     )
     assert Path(repo_path, "PROBLEM.md").exists()
@@ -334,7 +334,7 @@ Files written:
 Next: ask your agent to finish setup.
 
 For example:
-  Follow the setup instructions for autoevolve.
+  Read PROGRAM.md and start working.
 """
     )
     assert "TODO: describe the goal you want the agent to solve for." in Path(
@@ -378,7 +378,7 @@ Files written:
 Next: ask your agent to finish setup.
 
 For example:
-  Follow the setup instructions for autoevolve.
+  Read PROGRAM.md and start working.
 """
     )
     assert Path(repo_path, "PROBLEM.md").read_text(encoding="utf-8") == existing_problem
@@ -1357,19 +1357,20 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
 
 
 @pytest.mark.parametrize(
-    ("harness", "skill_path"),
+    ("harness", "skill_path", "handoff_prompt"),
     [
-        ("claude", ".claude/skills/autoevolve/SKILL.md"),
-        ("gemini", ".gemini/skills/autoevolve/SKILL.md"),
-        ("codex", ".codex/skills/autoevolve/SKILL.md"),
+        ("claude", ".claude/skills/autoevolve/SKILL.md", "/autoevolve"),
+        ("gemini", ".gemini/skills/autoevolve/SKILL.md", "autoevolve"),
+        ("codex", ".codex/skills/autoevolve/SKILL.md", "$autoevolve"),
     ],
 )
-def test_harness_init_variants(harness: str, skill_path: str) -> None:
+def test_harness_init_variants(harness: str, skill_path: str, handoff_prompt: str) -> None:
     repo_path = init_repo_from_fixture()
-    run(["init", harness, "--yes"], cwd=repo_path)
+    result = run(["init", harness, "--yes"], cwd=repo_path)
     skill_text = Path(repo_path, skill_path).read_text(encoding="utf-8")
     assert skill_text.startswith("---\nname: autoevolve\ndescription: ")
     assert "\n# Autoevolve Protocol\n" in skill_text
+    assert f"For example:\n  {handoff_prompt}\n" in result.stdout
 
 
 def test_continue_hooks() -> None:

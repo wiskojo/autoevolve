@@ -35,6 +35,7 @@ class ContinueHookFileSpec:
 
 @dataclass(frozen=True)
 class HarnessSpec:
+    handoff_prompt: str
     prompt_path: str
     uses_skill_frontmatter: bool
     continue_hook_files: tuple[ContinueHookFileSpec, ...] = ()
@@ -116,6 +117,7 @@ def _build_codex_config(existing_text: str | None) -> str:
 
 HARNESS_SPECS = {
     Harness.CLAUDE: HarnessSpec(
+        handoff_prompt="/autoevolve",
         prompt_path=".claude/skills/autoevolve/SKILL.md",
         uses_skill_frontmatter=True,
         continue_hook_files=(
@@ -126,6 +128,7 @@ HARNESS_SPECS = {
         ),
     ),
     Harness.CODEX: HarnessSpec(
+        handoff_prompt="$autoevolve",
         prompt_path=".codex/skills/autoevolve/SKILL.md",
         uses_skill_frontmatter=True,
         continue_hook_files=(
@@ -140,6 +143,7 @@ HARNESS_SPECS = {
         ),
     ),
     Harness.GEMINI: HarnessSpec(
+        handoff_prompt="autoevolve",
         prompt_path=".gemini/skills/autoevolve/SKILL.md",
         uses_skill_frontmatter=True,
         continue_hook_files=(
@@ -150,6 +154,7 @@ HARNESS_SPECS = {
         ),
     ),
     Harness.OTHER: HarnessSpec(
+        handoff_prompt=f"Read {ROOT_FILES.program} and start working.",
         prompt_path=ROOT_FILES.program,
         uses_skill_frontmatter=False,
     ),

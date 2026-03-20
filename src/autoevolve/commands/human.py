@@ -189,7 +189,7 @@ def run_init(
         repo_root,
         written_files,
         "ask your agent to finish setup.",
-        "Follow the setup instructions for autoevolve.",
+        harness_spec.handoff_prompt,
     )
 
 
