@@ -1040,9 +1040,9 @@ def run_lineage(
 def run_compare(left_ref: str, right_ref: str) -> None:
     repo_root = find_repo_root(os.getcwd())
     records = get_experiment_records(repo_root)
-    record_map = {record.sha: record for record in records}
     left_sha = resolve_ref(repo_root, left_ref)
     right_sha = resolve_ref(repo_root, right_ref)
+    record_map = {record.sha: record for record in records}
     left_record = record_map.get(left_sha)
     right_record = record_map.get(right_sha)
     if left_record is None:

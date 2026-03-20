@@ -134,7 +134,6 @@ def cli(ctx: click.Context) -> None:
         "Use --yes to skip confirmation prompts and write files immediately."
     ),
 )
-@click.argument("harness_arg", required=False, type=click.Choice(HARNESS_NAMES))
 @click.option("--harness", type=click.Choice(HARNESS_NAMES), help="Target agent harness.")
 @click.option(
     "--continue-hook",
@@ -143,16 +142,12 @@ def cli(ctx: click.Context) -> None:
 )
 @click.option("--yes", is_flag=True, help="Skip confirmation prompts.")
 def init_command(
-    harness_arg: str | None,
     harness: str | None,
     continue_hook: bool,
     yes: bool,
 ) -> None:
-    if harness_arg is not None and harness is not None and harness_arg != harness:
-        raise click.UsageError("Provide either a positional harness or --harness, not both.")
-    selected_harness = harness if harness is not None else harness_arg
     run_init(
-        harness=parse_harness(selected_harness) if selected_harness is not None else None,
+        harness=parse_harness(harness) if harness is not None else None,
         continue_hook=continue_hook,
         yes=yes,
     )

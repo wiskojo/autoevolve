@@ -201,7 +201,7 @@ python3 scripts/validate.py
 
 
 def init_other_now(repo_path: str | Path) -> None:
-    run(["init", "other", "--yes"], cwd=repo_path)
+    run(["init", "--harness", "other", "--yes"], cwd=repo_path)
     write_ready_problem(repo_path)
 
 
@@ -235,7 +235,7 @@ def populate_synthetic_branches(repo_path: str | Path) -> dict[str, str]:
 
 def test_other_init_and_help() -> None:
     repo_path = init_repo_from_fixture()
-    result = run(["init", "other", "--yes"], cwd=repo_path)
+    result = run(["init", "--harness", "other", "--yes"], cwd=repo_path)
     assert normalize_text(result.stdout, repo_path) == snapshot(
         """\
 Repository
@@ -314,7 +314,7 @@ Run "autoevolve <command> --help" for command-specific details.
 
 def test_other_init_writes_stub_problem() -> None:
     repo_path = init_repo_from_fixture()
-    result = run(["init", "other", "--yes"], cwd=repo_path)
+    result = run(["init", "--harness", "other", "--yes"], cwd=repo_path)
     assert normalize_text(result.stdout, repo_path) == snapshot(
         """\
 Repository
@@ -358,7 +358,7 @@ max benchmark_score
 python3 scripts/validate.py
 """
     Path(repo_path, "PROBLEM.md").write_text(existing_problem, encoding="utf-8")
-    result = run(["init", "other", "--yes"], cwd=repo_path)
+    result = run(["init", "--harness", "other", "--yes"], cwd=repo_path)
     assert normalize_text(result.stdout, repo_path) == snapshot(
         """\
 Repository
@@ -393,7 +393,7 @@ def test_legacy_commands_removed() -> None:
 def test_metric_protocol_validation() -> None:
     repo_path = init_repo_from_fixture()
     run(
-        ["init", "other", "--yes"],
+        ["init", "--harness", "other", "--yes"],
         cwd=repo_path,
     )
     Path(repo_path, "PROBLEM.md").write_text(
@@ -473,8 +473,10 @@ def test_removed_init_problem_options() -> None:
         "--constraints",
         "--validation",
     ]:
-        result = run(["init", "other", option], cwd=repo_path, expect_failure=True)
+        result = run(["init", "--harness", "other", option], cwd=repo_path, expect_failure=True)
         assert_click_error(result.stderr, f"No such option: {option}")
+    positional_harness = run(["init", "other", "--yes"], cwd=repo_path, expect_failure=True)
+    assert_click_error(positional_harness.stderr, "Got unexpected extra argument (other)")
 
 
 def test_protocol_prompt_lifecycle_guidance() -> None:
@@ -1302,7 +1304,7 @@ def test_managed_experiment_edge_cases_and_clean() -> None:
 )
 def test_harness_init_variants(harness: str, skill_path: str, handoff_prompt: str) -> None:
     repo_path = init_repo_from_fixture()
-    result = run(["init", harness, "--yes"], cwd=repo_path)
+    result = run(["init", "--harness", harness, "--yes"], cwd=repo_path)
     skill_text = Path(repo_path, skill_path).read_text(encoding="utf-8")
     assert skill_text.startswith("---\nname: autoevolve\ndescription: ")
     assert "\n# autoevolve protocol\n" in skill_text
@@ -1329,6 +1331,7 @@ def test_continue_hooks() -> None:
         run(
             [
                 "init",
+                "--harness",
                 harness,
                 "--continue-hook",
                 "--yes",
