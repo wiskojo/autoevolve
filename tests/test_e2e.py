@@ -13,7 +13,7 @@ import pytest
 from dirty_equals import IsPartialDict, IsStr
 from inline_snapshot import snapshot
 
-from autoevolve.prompt import build_protocol_prompt  # type: ignore[import-untyped]
+from autoevolve.prompt import build_protocol_body
 from tests.experiments import (
     EXPERIMENTS,
     build_experiment_object,
@@ -512,7 +512,7 @@ def test_metric_description_init() -> None:
 
 
 def test_protocol_prompt_lifecycle_guidance() -> None:
-    prompt = build_protocol_prompt()
+    prompt = build_protocol_body()
     assert "autoevolve start <name> <summary> [--from <ref>]" in prompt
     assert "autoevolve record" in prompt
     assert "autoevolve clean" in prompt

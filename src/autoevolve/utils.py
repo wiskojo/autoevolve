@@ -2,16 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from typing import Any, TypeGuard
 
 from autoevolve.constants import HARNESS_PATHS, ROOT_FILES
 from autoevolve.errors import AutoevolveError
-from autoevolve.models import (
-    ExperimentDocument,
-    ExperimentReference,
-    MetricValue,
-    experiment_document_to_dict,
-)
+from autoevolve.models import ExperimentDocument, ExperimentReference, MetricValue
 
 
 def resolve_repo_path(repo_root: str, relative_path: str) -> str:
@@ -112,8 +108,22 @@ def parse_experiment_json(json_text: str) -> ExperimentDocument:
     return ExperimentDocument(summary=summary, metrics=metrics, references=references)
 
 
-def experiment_document_to_json(document: ExperimentDocument) -> str:
-    return f"{json.dumps(experiment_document_to_dict(document), indent=2)}\n"
+def parse_iso_datetime(iso_date: str) -> datetime | None:
+    if not iso_date:
+        return None
+    try:
+        if iso_date.endswith("Z"):
+            return datetime.fromisoformat(iso_date[:-1] + "+00:00")
+        return datetime.fromisoformat(iso_date)
+    except ValueError:
+        return None
+
+
+def sort_iso_datetime_value(iso_date: str) -> int:
+    parsed = parse_iso_datetime(iso_date)
+    if parsed is None:
+        return 0
+    return int(parsed.timestamp())
 
 
 def format_metric_summary(metrics: dict[str, MetricValue] | None) -> str:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from typing import Any, cast
 
 import click
@@ -30,7 +29,7 @@ from autoevolve.models import (
     RecentOptions,
     SetOutputFormat,
 )
-from autoevolve.utils import format_metric_pairs, short_sha
+from autoevolve.utils import format_metric_pairs, short_sha, sort_iso_datetime_value
 
 
 def parse_recent_options(args: list[str]) -> RecentOptions:
@@ -168,19 +167,6 @@ def print_set_record(record: ExperimentRecord, output_format: SetOutputFormat) -
     click.echo(format_experiment_tsv_row(record))
 
 
-def _sort_date_value(date: str) -> int:
-    if not date:
-        return 0
-    try:
-        if date.endswith("Z"):
-            parsed = datetime.fromisoformat(date[:-1] + "+00:00")
-        else:
-            parsed = datetime.fromisoformat(date)
-    except ValueError:
-        return 0
-    return int(parsed.timestamp())
-
-
 def run_recent(args: list[str]) -> None:
     repo_root = find_repo_root(os.getcwd())
     options = parse_recent_options(args)
@@ -219,7 +205,7 @@ def run_best(args: list[str]) -> None:
         if metric_value is None:
             raise AutoevolveError(f'Metric "{objective.metric}" must be numeric for ranking.')
         ranked_value = metric_value if objective.direction == "min" else -metric_value
-        return (ranked_value, -_sort_date_value(record.date))
+        return (ranked_value, -sort_iso_datetime_value(record.date))
 
     records = sorted(records, key=best_key)[: options.limit]
     if not records:
@@ -266,7 +252,7 @@ def run_pareto(args: list[str]) -> None:
             if metric_value is None:
                 raise AutoevolveError(f'Metric "{objective.metric}" must be numeric for ranking.')
             values.append(metric_value if objective.direction == "min" else -metric_value)
-        values.append(-_sort_date_value(record.date))
+        values.append(-sort_iso_datetime_value(record.date))
         return tuple(values)
 
     records = apply_limit(sorted(frontier, key=pareto_key), options.limit)

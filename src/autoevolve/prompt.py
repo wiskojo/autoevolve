@@ -337,10 +337,6 @@ def build_protocol_body() -> str:
     )
 
 
-def build_protocol_prompt() -> str:
-    return build_protocol_body()
-
-
 def build_harness_prompt(harness: str) -> str:
     if harness == "other":
         return build_protocol_body()

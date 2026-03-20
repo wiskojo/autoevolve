@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timezone
 from functools import cmp_to_key
 from typing import Any, TypeVar, cast
 
@@ -20,7 +19,6 @@ from autoevolve.models import (
     BestOptions,
     ExperimentDocument,
     ExperimentRecord,
-    MetricValue,
     Objective,
     ParetoOptions,
     PrimaryMetricSpec,
@@ -30,7 +28,6 @@ from autoevolve.utils import (
     extract_excerpt,
     file_exists,
     format_metric_pairs,
-    format_metric_summary,
     is_number,
     parse_experiment_json,
     read_text_file,
@@ -42,27 +39,14 @@ JOURNAL_STUB_NOTE = "TODO: fill this in once you're done with your experiment."
 FormatT = TypeVar("FormatT", bound=str)
 
 
-def get_record_metrics(record: ExperimentRecord) -> dict[str, MetricValue] | None:
-    if record.parsed is None:
-        return None
-    return record.parsed.metrics
-
-
 def get_record_references(record: ExperimentRecord) -> list[Any]:
     if record.parsed is None or record.parsed.references is None:
         return []
     return record.parsed.references
 
 
-def get_record_metric_value(record: ExperimentRecord, metric: str) -> MetricValue:
-    metrics = get_record_metrics(record)
-    if metrics is None:
-        return None
-    return metrics.get(metric)
-
-
 def get_record_numeric_metric_value(record: ExperimentRecord, metric: str) -> int | float | None:
-    value = get_record_metric_value(record, metric)
+    value = record.parsed.metrics.get(metric) if record.parsed and record.parsed.metrics else None
     if not is_number(value):
         return None
     return value
@@ -700,215 +684,6 @@ def find_repo_worktree_by_path(repo_root: str, target_path: str) -> dict[str, An
     return None
 
 
-def format_worktree_state(worktree: dict[str, Any]) -> str:
-    labels = [worktree["branch"] or "(detached HEAD)"]
-    if worktree["isCurrent"]:
-        labels.append("current")
-    if worktree["isPrimary"]:
-        labels.append("primary")
-    if worktree["isManagedExperiment"]:
-        labels.append("managed")
-    elif not worktree["isPrimary"]:
-        labels.append("unmanaged")
-    labels.append("missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean")
-    return f"{worktree['path']} [{', '.join(labels)}] @ {worktree['shortHead']}"
-
-
-def format_managed_worktree_line(worktree: dict[str, Any]) -> str:
-    name = (
-        get_managed_experiment_name(worktree["branch"])
-        if worktree["branch"] and is_managed_experiment_branch(worktree["branch"])
-        else os.path.basename(worktree["path"])
-    )
-    state = "missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean"
-    return f"{name} @ {worktree['shortHead']} ({state})"
-
-
-def summarize_worktree_counts(worktrees: list[dict[str, Any]]) -> dict[str, int]:
-    dirty = len([worktree for worktree in worktrees if worktree["dirty"]])
-    missing = len([worktree for worktree in worktrees if worktree["isMissing"]])
-    return {
-        "clean": len(worktrees) - dirty - missing,
-        "dirty": dirty,
-        "missing": missing,
-        "total": len(worktrees),
-    }
-
-
-def _parse_iso_date(iso_date: str) -> datetime | None:
-    if not iso_date:
-        return None
-    try:
-        if iso_date.endswith("Z"):
-            return datetime.fromisoformat(iso_date[:-1] + "+00:00")
-        return datetime.fromisoformat(iso_date)
-    except ValueError:
-        return None
-
-
-def format_relative_time(iso_date: str) -> str:
-    target = _parse_iso_date(iso_date)
-    if target is None:
-        return ""
-    now = datetime.now(timezone.utc)
-    target_utc = target.astimezone(timezone.utc)
-    delta_ms = (target_utc - now).total_seconds() * 1000
-    abs_ms = abs(delta_ms)
-    if abs_ms < 60_000:
-        return "just now"
-    units = [
-        ("y", 365 * 24 * 60 * 60 * 1000),
-        ("mo", 30 * 24 * 60 * 60 * 1000),
-        ("w", 7 * 24 * 60 * 60 * 1000),
-        ("d", 24 * 60 * 60 * 1000),
-        ("h", 60 * 60 * 1000),
-        ("m", 60 * 1000),
-    ]
-    for label, millis in units:
-        if abs_ms >= millis:
-            value = round(abs_ms / millis)
-            return f"{value}{label} ago" if delta_ms < 0 else f"in {value}{label}"
-    return "just now"
-
-
-def format_signed_number(value: float) -> str:
-    rounded = float(f"{value:.6g}")
-    prefix = "+" if rounded >= 0 else ""
-    return f"{prefix}{rounded}"
-
-
-def format_experiment_summary(
-    record: dict[str, Any],
-    primary_metric: PrimaryMetricSpec | None,
-    extra_label: str = "",
-) -> str:
-    metric_summary = ""
-    if (
-        primary_metric is not None
-        and record.get("metrics") is not None
-        and is_number(record["metrics"].get(primary_metric.metric))
-    ):
-        metric_summary = (
-            f"{primary_metric.metric}={json.dumps(record['metrics'][primary_metric.metric])}"
-        )
-    elif record.get("metrics") is not None:
-        metric_summary = format_metric_summary(record["metrics"])
-    detail_parts = [part for part in [extra_label, format_relative_time(record["date"])] if part]
-    detail = f"  ({', '.join(detail_parts)})" if detail_parts else ""
-    return f"{record['short_sha']}{f'  {metric_summary}' if metric_summary else ''}{detail}"
-
-
-def truncate_status_summary(summary: str, max_length: int = 120) -> str:
-    compact = re.sub(r"\s+", " ", summary).strip()
-    if len(compact) <= max_length:
-        return compact
-    return f"{compact[: max_length - 3].rstrip()}..."
-
-
-def format_recent_experiment_line(
-    record: dict[str, Any], primary_metric: PrimaryMetricSpec | None
-) -> str:
-    summary = truncate_status_summary(record["summary"]) if record.get("summary") else ""
-    summary_suffix = f" | {summary}" if summary else ""
-    return f"{format_experiment_summary(record, primary_metric)}{summary_suffix}"
-
-
-def find_project_best_experiment_record(
-    records: list[ExperimentRecord], primary_metric: PrimaryMetricSpec | None
-) -> ExperimentRecord | None:
-    if primary_metric is None:
-        return None
-    candidates = [
-        record
-        for record in records
-        if record.parsed
-        and record.parsed.metrics
-        and is_number(record.parsed.metrics.get(primary_metric.metric))
-    ]
-    if not candidates:
-        return None
-    direction = primary_metric.direction
-    metric_name = primary_metric.metric
-
-    def sort_key(record: ExperimentRecord) -> tuple[int | float, str, str]:
-        metric_value = get_record_numeric_metric_value(record, metric_name)
-        if metric_value is None:
-            raise AutoevolveError(f'Metric "{metric_name}" must be numeric for ranking.')
-        ranked_value = metric_value if direction == "min" else -metric_value
-        return (ranked_value, record.date, record.sha)
-
-    return sorted(
-        candidates,
-        key=sort_key,
-    )[0]
-
-
-def find_recent_experiment_records(
-    records: list[ExperimentRecord], limit: int
-) -> list[ExperimentRecord]:
-    return sorted(records, key=lambda record: record.date, reverse=True)[:limit]
-
-
-def build_recent_trend(
-    records: list[ExperimentRecord], primary_metric: PrimaryMetricSpec | None
-) -> dict[str, Any] | None:
-    if primary_metric is None:
-        return None
-    sample = find_recent_experiment_records(
-        [
-            record
-            for record in records
-            if record.parsed
-            and record.parsed.metrics
-            and is_number(record.parsed.metrics.get(primary_metric.metric))
-        ],
-        5,
-    )
-    if len(sample) < 2:
-        return None
-    newest = sample[0]
-    oldest = sample[-1]
-    newest_value = get_record_numeric_metric_value(newest, primary_metric.metric)
-    oldest_value = get_record_numeric_metric_value(oldest, primary_metric.metric)
-    if not is_number(newest_value) or not is_number(oldest_value):
-        return None
-    newest_date = _parse_iso_date(newest.date)
-    oldest_date = _parse_iso_date(oldest.date)
-    span_ms = 0
-    if newest_date and oldest_date:
-        span_ms = max(
-            0,
-            int(
-                (
-                    newest_date.astimezone(timezone.utc) - oldest_date.astimezone(timezone.utc)
-                ).total_seconds()
-                * 1000
-            ),
-        )
-    return {
-        "delta": newest_value - oldest_value,
-        "sampleSize": len(sample),
-        "spanMs": span_ms,
-    }
-
-
-def format_duration_ms(duration_ms: int) -> str:
-    if duration_ms <= 0:
-        return "0m"
-    units = [
-        ("y", 365 * 24 * 60 * 60 * 1000),
-        ("mo", 30 * 24 * 60 * 60 * 1000),
-        ("w", 7 * 24 * 60 * 60 * 1000),
-        ("d", 24 * 60 * 60 * 1000),
-        ("h", 60 * 60 * 1000),
-        ("m", 60 * 1000),
-    ]
-    for label, millis in units:
-        if duration_ms >= millis:
-            return f"{round(duration_ms / millis)}{label}"
-    return "0m"
-
-
 def describe_worktree_for_removal(worktree: dict[str, Any]) -> str:
     state = "missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean"
     return (
@@ -974,26 +749,6 @@ def build_incoming_reference_map(
                 {"from": record.sha, "why": reference.why}
             )
     return incoming_map
-
-
-def compare_metric_records(
-    left: ExperimentRecord, right: ExperimentRecord, metric: str, direction: str
-) -> int:
-    left_value = left.parsed.metrics.get(metric) if left.parsed and left.parsed.metrics else None
-    right_value = (
-        right.parsed.metrics.get(metric) if right.parsed and right.parsed.metrics else None
-    )
-    if not is_number(left_value) or not is_number(right_value):
-        raise AutoevolveError(f'Metric "{metric}" must be numeric for ranking.')
-    if left_value == right_value:
-        if right.date > left.date:
-            return 1
-        if right.date < left.date:
-            return -1
-        return 0
-    if direction == "min":
-        return -1 if left_value < right_value else 1
-    return -1 if left_value > right_value else 1
 
 
 def get_merge_base(repo_root: str, left_sha: str, right_sha: str) -> str | None:

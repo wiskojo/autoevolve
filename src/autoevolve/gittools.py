@@ -19,10 +19,6 @@ def find_repo_root(cwd: str) -> str:
     return os.fspath(repo.working_tree_dir)
 
 
-def open_repo(repo_root: str) -> Repo:
-    return Repo(repo_root)
-
-
 def _clean_error_message(error: GitCommandError) -> str:
     stderr = (getattr(error, "stderr", "") or "").strip()
     stdout = (getattr(error, "stdout", "") or "").strip()

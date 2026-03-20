@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
 import click
@@ -17,34 +19,27 @@ from autoevolve.commands.shared import (
     build_incoming_reference_map,
     build_metric_diff,
     build_parent_metric_delta,
-    build_recent_trend,
     build_reference_diff,
     build_tip_map,
     describe_git_relationship,
     find_git_experiment_ancestor,
-    find_project_best_experiment_record,
-    find_recent_experiment_records,
-    format_duration_ms,
     format_experiment_line,
-    format_experiment_summary,
-    format_managed_worktree_line,
     format_metric_value,
-    format_recent_experiment_line,
-    format_signed_number,
-    format_worktree_state,
     get_current_branch_label,
     get_experiment_records,
     get_head_sha,
+    get_managed_experiment_name,
+    get_record_numeric_metric_value,
     inspect_active_tip_entry,
     inspect_current_record_state,
     is_checkout_dirty,
+    is_managed_experiment_branch,
     list_autoevolve_branches,
     list_repo_worktrees,
     parse_format,
     parse_positive_integer,
     resolve_ref,
     sort_tip_entries,
-    summarize_worktree_counts,
     try_read_file_at_ref,
 )
 from autoevolve.constants import ROOT_FILES
@@ -67,7 +62,10 @@ from autoevolve.utils import (
     extract_excerpt,
     file_exists,
     format_metric_pairs,
+    format_metric_summary,
+    is_number,
     parse_experiment_json,
+    parse_iso_datetime,
     read_text_file,
     short_sha,
 )
@@ -230,6 +228,200 @@ def parse_show_options(args: list[str]) -> ShowOptions:
             continue
         raise AutoevolveError(f'Unexpected argument "{token}" for show.')
     return ShowOptions(format=output_format, ref=ref)
+
+
+def format_worktree_state(worktree: dict[str, Any]) -> str:
+    labels = [worktree["branch"] or "(detached HEAD)"]
+    if worktree["isCurrent"]:
+        labels.append("current")
+    if worktree["isPrimary"]:
+        labels.append("primary")
+    if worktree["isManagedExperiment"]:
+        labels.append("managed")
+    elif not worktree["isPrimary"]:
+        labels.append("unmanaged")
+    labels.append("missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean")
+    return f"{worktree['path']} [{', '.join(labels)}] @ {worktree['shortHead']}"
+
+
+def format_managed_worktree_line(worktree: dict[str, Any]) -> str:
+    branch_name = worktree["branch"]
+    name = (
+        get_managed_experiment_name(branch_name)
+        if branch_name and is_managed_experiment_branch(branch_name)
+        else os.path.basename(worktree["path"])
+    )
+    state = "missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean"
+    return f"{name} @ {worktree['shortHead']} ({state})"
+
+
+def summarize_worktree_counts(worktrees: list[dict[str, Any]]) -> dict[str, int]:
+    dirty = len([worktree for worktree in worktrees if worktree["dirty"]])
+    missing = len([worktree for worktree in worktrees if worktree["isMissing"]])
+    return {
+        "clean": len(worktrees) - dirty - missing,
+        "dirty": dirty,
+        "missing": missing,
+        "total": len(worktrees),
+    }
+
+
+def format_relative_time(iso_date: str) -> str:
+    target = parse_iso_datetime(iso_date)
+    if target is None:
+        return ""
+    now = datetime.now(timezone.utc)
+    target_utc = target.astimezone(timezone.utc)
+    delta_ms = (target_utc - now).total_seconds() * 1000
+    abs_ms = abs(delta_ms)
+    if abs_ms < 60_000:
+        return "just now"
+    units = [
+        ("y", 365 * 24 * 60 * 60 * 1000),
+        ("mo", 30 * 24 * 60 * 60 * 1000),
+        ("w", 7 * 24 * 60 * 60 * 1000),
+        ("d", 24 * 60 * 60 * 1000),
+        ("h", 60 * 60 * 1000),
+        ("m", 60 * 1000),
+    ]
+    for label, millis in units:
+        if abs_ms >= millis:
+            value = round(abs_ms / millis)
+            return f"{value}{label} ago" if delta_ms < 0 else f"in {value}{label}"
+    return "just now"
+
+
+def format_signed_number(value: float) -> str:
+    rounded = float(f"{value:.6g}")
+    prefix = "+" if rounded >= 0 else ""
+    return f"{prefix}{rounded}"
+
+
+def format_experiment_summary(
+    record: dict[str, Any],
+    primary_metric: PrimaryMetricSpec | None,
+    extra_label: str = "",
+) -> str:
+    metric_summary = ""
+    if (
+        primary_metric is not None
+        and record.get("metrics") is not None
+        and is_number(record["metrics"].get(primary_metric.metric))
+    ):
+        metric_summary = (
+            f"{primary_metric.metric}={json.dumps(record['metrics'][primary_metric.metric])}"
+        )
+    elif record.get("metrics") is not None:
+        metric_summary = format_metric_summary(record["metrics"])
+    detail_parts = [part for part in [extra_label, format_relative_time(record["date"])] if part]
+    detail = f"  ({', '.join(detail_parts)})" if detail_parts else ""
+    return f"{record['short_sha']}{f'  {metric_summary}' if metric_summary else ''}{detail}"
+
+
+def truncate_status_summary(summary: str, max_length: int = 120) -> str:
+    compact = re.sub(r"\s+", " ", summary).strip()
+    if len(compact) <= max_length:
+        return compact
+    return f"{compact[: max_length - 3].rstrip()}..."
+
+
+def format_recent_experiment_line(
+    record: dict[str, Any], primary_metric: PrimaryMetricSpec | None
+) -> str:
+    summary = truncate_status_summary(record["summary"]) if record.get("summary") else ""
+    summary_suffix = f" | {summary}" if summary else ""
+    return f"{format_experiment_summary(record, primary_metric)}{summary_suffix}"
+
+
+def find_project_best_experiment_record(
+    records: list[ExperimentRecord], primary_metric: PrimaryMetricSpec | None
+) -> ExperimentRecord | None:
+    if primary_metric is None:
+        return None
+    candidates = [
+        record
+        for record in records
+        if record.parsed
+        and record.parsed.metrics
+        and is_number(record.parsed.metrics.get(primary_metric.metric))
+    ]
+    if not candidates:
+        return None
+
+    def sort_key(record: ExperimentRecord) -> tuple[int | float, str, str]:
+        metric_value = get_record_numeric_metric_value(record, primary_metric.metric)
+        if metric_value is None:
+            raise AutoevolveError(f'Metric "{primary_metric.metric}" must be numeric for ranking.')
+        ranked_value = metric_value if primary_metric.direction == "min" else -metric_value
+        return (ranked_value, record.date, record.sha)
+
+    return sorted(candidates, key=sort_key)[0]
+
+
+def find_recent_experiment_records(
+    records: list[ExperimentRecord], limit: int
+) -> list[ExperimentRecord]:
+    return sorted(records, key=lambda record: record.date, reverse=True)[:limit]
+
+
+def build_recent_trend(
+    records: list[ExperimentRecord], primary_metric: PrimaryMetricSpec | None
+) -> dict[str, Any] | None:
+    if primary_metric is None:
+        return None
+    sample = find_recent_experiment_records(
+        [
+            record
+            for record in records
+            if record.parsed
+            and record.parsed.metrics
+            and is_number(record.parsed.metrics.get(primary_metric.metric))
+        ],
+        5,
+    )
+    if len(sample) < 2:
+        return None
+    newest = sample[0]
+    oldest = sample[-1]
+    newest_value = get_record_numeric_metric_value(newest, primary_metric.metric)
+    oldest_value = get_record_numeric_metric_value(oldest, primary_metric.metric)
+    if not is_number(newest_value) or not is_number(oldest_value):
+        return None
+    newest_date = parse_iso_datetime(newest.date)
+    oldest_date = parse_iso_datetime(oldest.date)
+    span_ms = 0
+    if newest_date and oldest_date:
+        span_ms = max(
+            0,
+            int(
+                (
+                    newest_date.astimezone(timezone.utc) - oldest_date.astimezone(timezone.utc)
+                ).total_seconds()
+                * 1000
+            ),
+        )
+    return {
+        "delta": newest_value - oldest_value,
+        "sampleSize": len(sample),
+        "spanMs": span_ms,
+    }
+
+
+def format_duration_ms(duration_ms: int) -> str:
+    if duration_ms <= 0:
+        return "0m"
+    units = [
+        ("y", 365 * 24 * 60 * 60 * 1000),
+        ("mo", 30 * 24 * 60 * 60 * 1000),
+        ("w", 7 * 24 * 60 * 60 * 1000),
+        ("d", 24 * 60 * 60 * 1000),
+        ("h", 60 * 60 * 1000),
+        ("m", 60 * 1000),
+    ]
+    for label, millis in units:
+        if duration_ms >= millis:
+            return f"{round(duration_ms / millis)}{label}"
+    return "0m"
 
 
 def build_status_output(repo_root: str, records: list[ExperimentRecord]) -> dict[str, Any]:

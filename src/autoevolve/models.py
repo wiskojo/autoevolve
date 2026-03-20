@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
-Harness = Literal["claude", "codex", "gemini", "other"]
 MetricDirection = Literal["max", "min"]
 MetricValue = bool | int | float | str | None
 SetOutputFormat = Literal["jsonl", "tsv"]
@@ -26,21 +25,10 @@ class ExperimentDocument:
 
 
 @dataclass(frozen=True)
-class HistoryEntry:
+class ExperimentRecord:
     date: str
     sha: str
     subject: str
-
-
-@dataclass(frozen=True)
-class BranchTip:
-    name: str
-    sha: str
-    subject: str
-
-
-@dataclass(frozen=True)
-class ExperimentRecord(HistoryEntry):
     experiment_text: str
     journal_text: str
     parsed: ExperimentDocument | None
@@ -126,14 +114,3 @@ class StartOptions:
 class CleanOptions:
     force: bool = False
     name: str = ""
-
-
-def experiment_document_to_dict(document: ExperimentDocument) -> dict[str, Any]:
-    payload: dict[str, Any] = {"summary": document.summary}
-    if document.metrics is not None:
-        payload["metrics"] = document.metrics
-    if document.references is not None:
-        payload["references"] = [
-            {"commit": reference.commit, "why": reference.why} for reference in document.references
-        ]
-    return payload
