@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-import json
 import os
-from typing import Any
 
 import click
 
-from autoevolve.constants import HARNESS_PATHS, ROOT_FILES, SUPPORTED_HARNESSES
+from autoevolve.constants import ROOT_FILES
 from autoevolve.errors import AutoevolveError
 from autoevolve.gittools import find_repo_root
+from autoevolve.harnesses import (
+    DEFAULT_HARNESS,
+    HARNESS_NAMES,
+    Harness,
+    get_harness_spec,
+)
 from autoevolve.problem import (
     PRIMARY_METRIC_SPEC_EXAMPLE,
     build_primary_metric_init_note,
@@ -30,18 +34,6 @@ from autoevolve.utils import (
     read_text_file,
     resolve_repo_path,
     write_text_file,
-)
-
-CLAUDE_SETTINGS_PATH = os.path.join(".claude", "settings.json")
-GEMINI_SETTINGS_PATH = os.path.join(".gemini", "settings.json")
-CODEX_CONFIG_PATH = os.path.join(".codex", "config.toml")
-CODEX_HOOKS_PATH = os.path.join(".codex", "hooks.json")
-
-CLAUDE_CONTINUE_HOOK_COMMAND = "printf '%s\\n' 'Are you done? If not, continue.' >&2; exit 2"
-GEMINI_CONTINUE_HOOK_COMMAND = "printf '%s\\n' 'Are you done? If not, continue.' >&2; exit 2"
-CODEX_CONTINUE_HOOK_COMMAND = (
-    "cat >/dev/null; printf '%s\\n' "
-    '\'{"decision":"block","reason":"Are you done? If not, continue."}\''
 )
 
 
@@ -93,15 +85,15 @@ def print_post_init_summary(
     click.echo(f"  {example_prompt}")
 
 
-def choose_harness(initial_value: str) -> str:
+def choose_harness(initial_value: Harness) -> Harness:
     prompt = "Which coding agent should autoevolve target?"
     choice = click.prompt(
-        f"{prompt} [{'/'.join(SUPPORTED_HARNESSES)}]",
-        type=click.Choice(SUPPORTED_HARNESSES),
-        default=initial_value,
+        f"{prompt} [{'/'.join(HARNESS_NAMES)}]",
+        type=click.Choice(HARNESS_NAMES),
+        default=initial_value.value,
         show_choices=False,
     )
-    return str(choice)
+    return Harness(str(choice))
 
 
 def choose_setup_mode(initial_value: str) -> str:
@@ -126,13 +118,9 @@ def choose_keep_existing_problem() -> bool:
     return bool(click.confirm(f"Keep the existing {ROOT_FILES.problem}?", default=True))
 
 
-def supports_continue_hook(harness: str) -> bool:
-    return harness in {"claude", "codex", "gemini"}
-
-
-def choose_continue_hook(harness: str) -> bool:
+def choose_continue_hook(harness: Harness) -> bool:
     click.echo("Continue Forever Hook")
-    click.echo(f"Install a {harness} stop hook that prevents early termination.")
+    click.echo(f"Install a {harness.value} stop hook that prevents early termination.")
     click.echo(
         "If enabled, the agent should keep running until it believes it is "
         "done or a human interrupts it."
@@ -231,79 +219,6 @@ def write_file_with_confirmation(
     return True
 
 
-def parse_json_object_file(existing_text: str | None) -> dict[str, Any]:
-    if existing_text is None:
-        return {}
-    parsed = json.loads(existing_text)
-    if not isinstance(parsed, dict):
-        raise AutoevolveError("settings file must contain a JSON object.")
-    return dict(parsed)
-
-
-def append_hook_entry(
-    hooks_value: object, event_name: str, hook_entry: dict[str, Any]
-) -> dict[str, Any]:
-    hooks = dict(hooks_value) if isinstance(hooks_value, dict) else {}
-    existing_entries = (
-        list(hooks.get(event_name, [])) if isinstance(hooks.get(event_name), list) else []
-    )
-    if all(entry != hook_entry for entry in existing_entries):
-        existing_entries.append(hook_entry)
-    hooks[event_name] = existing_entries
-    return hooks
-
-
-def build_claude_continue_hook_settings(existing_text: str | None) -> str:
-    settings = parse_json_object_file(existing_text)
-    hook_entry = {"hooks": [{"type": "command", "command": CLAUDE_CONTINUE_HOOK_COMMAND}]}
-    settings["hooks"] = append_hook_entry(settings.get("hooks"), "Stop", hook_entry)
-    return f"{json.dumps(settings, indent=2)}\n"
-
-
-def build_gemini_continue_hook_settings(existing_text: str | None) -> str:
-    settings = parse_json_object_file(existing_text)
-    hook_entry = {
-        "hooks": [
-            {
-                "name": "autoevolve-continue",
-                "type": "command",
-                "command": GEMINI_CONTINUE_HOOK_COMMAND,
-            }
-        ]
-    }
-    settings["hooks"] = append_hook_entry(settings.get("hooks"), "AfterAgent", hook_entry)
-    return f"{json.dumps(settings, indent=2)}\n"
-
-
-def build_codex_hooks(existing_text: str | None) -> str:
-    hooks_document = parse_json_object_file(existing_text)
-    hook_entry = {"hooks": [{"type": "command", "command": CODEX_CONTINUE_HOOK_COMMAND}]}
-    hooks_document["hooks"] = append_hook_entry(hooks_document.get("hooks"), "Stop", hook_entry)
-    return f"{json.dumps(hooks_document, indent=2)}\n"
-
-
-def build_codex_config(existing_text: str | None) -> str:
-    if existing_text is None or not existing_text.strip():
-        return "[features]\ncodex_hooks = true\n"
-    if "codex_hooks" in existing_text:
-        updated = existing_text.replace("codex_hooks = false", "codex_hooks = true")
-        return f"{updated.strip()}\n"
-    if "[features]" in existing_text:
-        updated = existing_text.replace("[features]", "[features]\ncodex_hooks = true", 1)
-        return f"{updated.strip()}\n"
-    return f"{existing_text.strip()}\n\n[features]\ncodex_hooks = true\n"
-
-
-def get_continue_hook_files(harness: str) -> list[str]:
-    if harness == "claude":
-        return [CLAUDE_SETTINGS_PATH]
-    if harness == "gemini":
-        return [GEMINI_SETTINGS_PATH]
-    if harness == "codex":
-        return [CODEX_CONFIG_PATH, CODEX_HOOKS_PATH]
-    return []
-
-
 def _read_if_exists(path: str) -> str | None:
     if not os.path.exists(path):
         return None
@@ -312,55 +227,24 @@ def _read_if_exists(path: str) -> str | None:
 
 
 def write_continue_hook_files(
-    repo_root: str, harness: str, overwrite_by_default: bool
+    repo_root: str, harness: Harness, overwrite_by_default: bool
 ) -> list[str]:
-    if harness == "claude":
-        existing_text = _read_if_exists(resolve_repo_path(repo_root, CLAUDE_SETTINGS_PATH))
+    written: list[str] = []
+    for file_spec in get_harness_spec(harness).continue_hook_files:
+        existing_text = _read_if_exists(resolve_repo_path(repo_root, file_spec.path))
         wrote = write_file_with_confirmation(
             repo_root,
-            CLAUDE_SETTINGS_PATH,
-            build_claude_continue_hook_settings(existing_text),
+            file_spec.path,
+            file_spec.build_contents(existing_text),
             overwrite_by_default,
         )
-        return [CLAUDE_SETTINGS_PATH] if wrote else []
-
-    if harness == "gemini":
-        existing_text = _read_if_exists(resolve_repo_path(repo_root, GEMINI_SETTINGS_PATH))
-        wrote = write_file_with_confirmation(
-            repo_root,
-            GEMINI_SETTINGS_PATH,
-            build_gemini_continue_hook_settings(existing_text),
-            overwrite_by_default,
-        )
-        return [GEMINI_SETTINGS_PATH] if wrote else []
-
-    if harness == "codex":
-        existing_config_text = _read_if_exists(resolve_repo_path(repo_root, CODEX_CONFIG_PATH))
-        existing_hooks_text = _read_if_exists(resolve_repo_path(repo_root, CODEX_HOOKS_PATH))
-        wrote_config = write_file_with_confirmation(
-            repo_root,
-            CODEX_CONFIG_PATH,
-            build_codex_config(existing_config_text),
-            overwrite_by_default,
-        )
-        wrote_hooks = write_file_with_confirmation(
-            repo_root,
-            CODEX_HOOKS_PATH,
-            build_codex_hooks(existing_hooks_text),
-            overwrite_by_default,
-        )
-        written: list[str] = []
-        if wrote_config:
-            written.append(CODEX_CONFIG_PATH)
-        if wrote_hooks:
-            written.append(CODEX_HOOKS_PATH)
-        return written
-
-    return []
+        if wrote:
+            written.append(file_spec.path)
+    return written
 
 
 def run_init(
-    harness: str | None = None,
+    harness: Harness | None = None,
     mode: str | None = None,
     goal: str | None = None,
     metric: str | None = None,
@@ -374,11 +258,14 @@ def run_init(
 
     confirm_write(repo_root, yes)
 
-    selected_harness = harness or choose_harness("claude")
-    if continue_hook and not supports_continue_hook(selected_harness):
-        raise AutoevolveError(f'Continue hooks are not supported for harness "{selected_harness}".')
+    selected_harness = harness or choose_harness(DEFAULT_HARNESS)
+    harness_spec = get_harness_spec(selected_harness)
+    if continue_hook and not harness_spec.supports_continue_hook:
+        raise AutoevolveError(
+            f'Continue hooks are not supported for harness "{selected_harness.value}".'
+        )
 
-    continue_hook = supports_continue_hook(selected_harness) and (
+    continue_hook = harness_spec.supports_continue_hook and (
         continue_hook or (not yes and choose_continue_hook(selected_harness))
     )
 
@@ -437,11 +324,13 @@ def run_init(
         )
     )
 
-    prompt_path = HARNESS_PATHS[selected_harness]
-    harness_extra_files = get_continue_hook_files(selected_harness) if continue_hook else []
+    prompt_path = harness_spec.prompt_path
+    harness_extra_files = (
+        [file_spec.path for file_spec in harness_spec.continue_hook_files] if continue_hook else []
+    )
     planned_write_files = [prompt_path, *harness_extra_files]
 
-    review_lines = [f"Harness: {selected_harness}"]
+    review_lines = [f"Harness: {selected_harness.value}"]
     if continue_hook:
         review_lines.append("Continue hook: enabled")
     if keep_existing_problem:

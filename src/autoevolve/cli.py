@@ -18,10 +18,10 @@ from autoevolve.commands.inspect import (
 from autoevolve.commands.lifecycle import run_clean, run_record, run_start
 from autoevolve.constants import (
     MANAGED_WORKTREE_ROOT,
-    SUPPORTED_HARNESSES,
     format_home_relative_path,
 )
 from autoevolve.errors import AutoevolveError
+from autoevolve.harnesses import HARNESS_NAMES, parse_harness
 from autoevolve.models import (
     GraphDirection,
     GraphEdges,
@@ -130,8 +130,8 @@ def cli(ctx: click.Context) -> None:
         "prompts and write files immediately."
     ),
 )
-@click.argument("harness_arg", required=False, type=click.Choice(SUPPORTED_HARNESSES))
-@click.option("--harness", type=click.Choice(SUPPORTED_HARNESSES), help="Target agent harness.")
+@click.argument("harness_arg", required=False, type=click.Choice(HARNESS_NAMES))
+@click.option("--harness", type=click.Choice(HARNESS_NAMES), help="Target agent harness.")
 @click.option(
     "--mode",
     type=click.Choice(("now", "scaffold")),
@@ -162,8 +162,9 @@ def init_command(
 ) -> None:
     if harness_arg is not None and harness is not None and harness_arg != harness:
         raise click.UsageError("Provide either a positional harness or --harness, not both.")
+    selected_harness = harness if harness is not None else harness_arg
     run_init(
-        harness=harness or harness_arg,
+        harness=parse_harness(selected_harness) if selected_harness is not None else None,
         mode=mode,
         goal=goal,
         metric=metric,

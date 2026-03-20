@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from autoevolve.constants import MANAGED_WORKTREE_ROOT, ROOT_FILES, format_home_relative_path
+from autoevolve.harnesses import Harness, get_harness_spec
 from autoevolve.problem import build_problem_metric_section
 
 
@@ -337,8 +338,8 @@ def build_protocol_body() -> str:
     )
 
 
-def build_harness_prompt(harness: str) -> str:
-    if harness == "other":
+def build_harness_prompt(harness: Harness) -> str:
+    if not get_harness_spec(harness).uses_skill_frontmatter:
         return build_protocol_body()
     return "\n".join(
         [

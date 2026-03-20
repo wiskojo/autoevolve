@@ -5,8 +5,9 @@ import os
 from datetime import datetime
 from typing import Any, TypeGuard
 
-from autoevolve.constants import HARNESS_PATHS, ROOT_FILES
+from autoevolve.constants import ROOT_FILES
 from autoevolve.errors import AutoevolveError
+from autoevolve.harnesses import HARNESS_SPECS
 from autoevolve.models import ExperimentDocument, ExperimentReference, MetricValue
 
 
@@ -147,9 +148,9 @@ def format_metric_pairs(metrics: dict[str, MetricValue] | None) -> str:
 
 def find_prompt_files(repo_root: str) -> list[dict[str, str]]:
     matches: list[dict[str, str]] = []
-    for harness, relative_path in HARNESS_PATHS.items():
-        if file_exists(repo_root, relative_path):
-            matches.append({"harness": harness, "relative_path": relative_path})
+    for harness, spec in HARNESS_SPECS.items():
+        if file_exists(repo_root, spec.prompt_path):
+            matches.append({"harness": harness.value, "relative_path": spec.prompt_path})
     return matches
 
 

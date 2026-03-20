@@ -17,15 +17,6 @@ ROOT_FILES = RootFiles()
 MANAGED_EXPERIMENT_BRANCH_PREFIX = "autoevolve/"
 MANAGED_WORKTREE_ROOT = str(Path.home() / ".autoevolve" / "worktrees")
 
-HARNESS_PATHS = {
-    "claude": os.path.join(".claude", "skills", "autoevolve", "SKILL.md"),
-    "codex": os.path.join(".codex", "skills", "autoevolve", "SKILL.md"),
-    "gemini": os.path.join(".gemini", "skills", "autoevolve", "SKILL.md"),
-    "other": ROOT_FILES.autoevolve,
-}
-
-SUPPORTED_HARNESSES = tuple(HARNESS_PATHS.keys())
-
 
 def format_home_relative_path(path: str | os.PathLike[str]) -> str:
     expanded_path = Path(path).expanduser()
