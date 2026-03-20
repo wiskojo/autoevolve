@@ -48,4 +48,4 @@ warn_unreachable = true
 testpaths = ["tests"]
 
 [tool.inline-snapshot]
-format-command = "ruff format {filename}"
+format-command = "ruff format --stdin-filename {filename} -"
