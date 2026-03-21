@@ -36,7 +36,9 @@ def status() -> None:
     repository = ExperimentRepository()
     records = repository.records()
     worktrees = repository.active_worktrees()
-    managed = [worktree for worktree in worktrees if worktree.is_managed and not worktree.is_primary]
+    managed = [
+        worktree for worktree in worktrees if worktree.is_managed and not worktree.is_primary
+    ]
     unmanaged = [
         worktree for worktree in worktrees if not worktree.is_managed and not worktree.is_primary
     ]
@@ -459,7 +461,9 @@ def _recent_trend(records: list[ExperimentRecord], metric: str) -> tuple[float, 
         return None
     if not isinstance(oldest, (int, float)) or isinstance(oldest, bool):
         return None
-    span_ms = int((_parse_date(sample[0].date) - _parse_date(sample[-1].date)).total_seconds() * 1000)
+    span_ms = int(
+        (_parse_date(sample[0].date) - _parse_date(sample[-1].date)).total_seconds() * 1000
+    )
     return float(newest) - float(oldest), len(sample), max(0, span_ms)
 
 

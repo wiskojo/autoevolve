@@ -17,11 +17,12 @@ from autoevolve.models.experiment import (
 from autoevolve.models.lineage import LineageEdge, LineageGraph
 from autoevolve.models.types import GraphDirection, GraphEdges, MetricValue
 from autoevolve.problem import parse_problem_spec
-from autoevolve.workspace import WORKTREE_ROOT
 
 EXPERIMENT_FILE = "EXPERIMENT.json"
 JOURNAL_FILE = "JOURNAL.md"
 PROBLEM_FILE = "PROBLEM.md"
+WORKTREE_ROOT = Path.home() / ".autoevolve" / "worktrees"
+WORKTREE_ROOT_DISPLAY = "~/.autoevolve/worktrees"
 
 
 class ExperimentRepository:

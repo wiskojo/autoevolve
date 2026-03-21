@@ -6,14 +6,18 @@ from git.exc import GitCommandError
 
 from autoevolve.git import find_repo_root, list_linked_worktrees, open_repo
 from autoevolve.models.experiment import ExperimentWorktree
-from autoevolve.models.worktree import CleanedWorktrees, RecordedExperiment, StartedExperiment
+from autoevolve.models.worktree import (
+    CleanedWorktrees,
+    RecordedExperiment,
+    StartedExperiment,
+)
 from autoevolve.repository import (
     EXPERIMENT_FILE,
     JOURNAL_FILE,
+    WORKTREE_ROOT,
     ExperimentRepository,
     parse_experiment_document,
 )
-from autoevolve.workspace import WORKTREE_ROOT
 
 _REF_PREFIX = "autoevolve/"
 
@@ -30,7 +34,9 @@ class ExperimentWorktreeManager:
         try:
             self.repo.git.check_ref_format(f"refs/heads/{ref_name}")
         except GitCommandError as error:
-            raise ValueError(f'"{ref_name}" is not a valid managed experiment branch name.') from error
+            raise ValueError(
+                f'"{ref_name}" is not a valid managed experiment branch name.'
+            ) from error
         if any(head.name == ref_name for head in self.repo.heads):
             raise RuntimeError(f'Branch "{ref_name}" already exists.')
 
@@ -106,12 +112,16 @@ class ExperimentWorktreeManager:
 
     def clean(self, name: str | None, force: bool) -> CleanedWorktrees:
         worktrees = ExperimentRepository(self.root).active_worktrees()
-        managed = [worktree for worktree in worktrees if worktree.is_managed and not worktree.is_primary]
+        managed = [
+            worktree for worktree in worktrees if worktree.is_managed and not worktree.is_primary
+        ]
         experiment_name = ""
         if name is not None:
             experiment_name = self._normalize_name(name)
             target_path = (WORKTREE_ROOT / experiment_name).resolve()
-            target = next((worktree for worktree in worktrees if worktree.path == target_path), None)
+            target = next(
+                (worktree for worktree in worktrees if worktree.path == target_path), None
+            )
             if target is None or target.is_primary or not target.is_managed:
                 raise RuntimeError(
                     f'No managed experiment worktree named "{experiment_name}" found for this repository.'

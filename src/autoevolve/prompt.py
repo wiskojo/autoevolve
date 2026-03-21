@@ -1,8 +1,12 @@
 from textwrap import dedent
 
 from autoevolve.harnesses import Harness, get_harness_spec
-from autoevolve.repository import EXPERIMENT_FILE, JOURNAL_FILE, PROBLEM_FILE
-from autoevolve.workspace import WORKTREE_ROOT, display_path
+from autoevolve.repository import (
+    EXPERIMENT_FILE,
+    JOURNAL_FILE,
+    PROBLEM_FILE,
+    WORKTREE_ROOT_DISPLAY,
+)
 
 PROMPT_BODY_TEMPLATE = dedent(
     """\
@@ -112,7 +116,7 @@ def build_prompt_body() -> str:
     return PROMPT_BODY_TEMPLATE.format(
         experiment=EXPERIMENT_FILE,
         journal=JOURNAL_FILE,
-        managed_worktree_root=display_path(WORKTREE_ROOT),
+        managed_worktree_root=WORKTREE_ROOT_DISPLAY,
         problem=PROBLEM_FILE,
     )
 

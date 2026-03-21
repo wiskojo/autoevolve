@@ -3,7 +3,7 @@ from typing import Annotated
 import typer
 
 from autoevolve.app import app
-from autoevolve.workspace import WORKTREE_ROOT, display_path
+from autoevolve.repository import WORKTREE_ROOT_DISPLAY
 from autoevolve.worktree import ExperimentWorktreeManager
 
 
@@ -13,7 +13,7 @@ from autoevolve.worktree import ExperimentWorktreeManager
     short_help="Create a managed experiment branch and worktree.",
     help=(
         "Create a managed experiment worktree.\n\n"
-        f"Managed worktrees are created under {display_path(WORKTREE_ROOT)}."
+        f"Managed worktrees are created under {WORKTREE_ROOT_DISPLAY}."
     ),
 )
 def start(
@@ -37,8 +37,7 @@ def start(
     help=(
         "Validate, commit, and remove the current managed worktree.\n\n"
         "record stages all changes, commits using the first line of EXPERIMENT.json "
-        f"summary, and removes the current managed worktree under "
-        f"{display_path(WORKTREE_ROOT)}."
+        f"summary, and removes the current managed worktree under {WORKTREE_ROOT_DISPLAY}."
     ),
 )
 def record() -> None:
@@ -53,7 +52,7 @@ def record() -> None:
     short_help="Remove stale managed worktrees for this repository.",
     help=(
         "Remove stale managed worktrees for this repository.\n\n"
-        f"clean only removes worktrees under {display_path(WORKTREE_ROOT)} that belong "
+        f"clean only removes worktrees under {WORKTREE_ROOT_DISPLAY} that belong "
         "to the current repository."
     ),
 )
@@ -74,4 +73,6 @@ def clean(
         typer.echo(f"Experiment: {result.experiment_name}")
     for worktree in result.removed:
         state = "missing" if worktree.is_missing else "dirty" if worktree.dirty else "clean"
-        typer.echo(f"  {worktree.path} ({worktree.branch or '(detached HEAD)'}, {state}, {worktree.head[:7]})")
+        typer.echo(
+            f"  {worktree.path} ({worktree.branch or '(detached HEAD)'}, {state}, {worktree.head[:7]})"
+        )
