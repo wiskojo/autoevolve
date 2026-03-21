@@ -1,10 +1,14 @@
 from collections.abc import Sequence
-from importlib import import_module
 
 import click
 import typer
 from typer.core import TyperGroup
 from typer.main import get_command
+
+from autoevolve.commands.analytics import app as analytics_app
+from autoevolve.commands.human import app as human_app
+from autoevolve.commands.inspect import app as inspect_app
+from autoevolve.commands.lifecycle import app as lifecycle_app
 
 
 class AutoevolveGroup(TyperGroup):
@@ -63,6 +67,11 @@ app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 
+app.add_typer(human_app)
+app.add_typer(lifecycle_app)
+app.add_typer(inspect_app)
+app.add_typer(analytics_app)
+
 
 @app.callback()
 def main_callback(ctx: typer.Context) -> None:
@@ -91,10 +100,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as error:
         typer.echo(str(error), err=True)
         return 1
-
-
-for module in ("human", "lifecycle", "inspect", "analytics"):
-    import_module(f"autoevolve.commands.{module}")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,6 @@ from typing import Annotated
 
 import typer
 
-from autoevolve.app import app
 from autoevolve.git import diff
 from autoevolve.models.experiment import (
     ExperimentDocument,
@@ -20,6 +19,8 @@ from autoevolve.repository import (
     JOURNAL_FILE,
     ExperimentRepository,
 )
+
+app = typer.Typer()
 
 
 @app.command(

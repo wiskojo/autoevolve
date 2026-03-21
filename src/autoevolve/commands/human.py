@@ -2,10 +2,11 @@ from typing import Annotated
 
 import typer
 
-from autoevolve.app import app
 from autoevolve.harnesses import Harness, get_harness_spec
 from autoevolve.repository import PROBLEM_FILE
 from autoevolve.scaffold import Scaffolder
+
+app = typer.Typer()
 
 
 @app.command(

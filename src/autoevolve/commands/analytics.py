@@ -3,10 +3,11 @@ from typing import Annotated
 
 import typer
 
-from autoevolve.app import app
 from autoevolve.models.experiment import ExperimentRecord, Objective
 from autoevolve.models.types import SetOutputFormat
 from autoevolve.repository import ExperimentRepository
+
+app = typer.Typer()
 
 
 @app.command(

@@ -2,9 +2,10 @@ from typing import Annotated
 
 import typer
 
-from autoevolve.app import app
 from autoevolve.repository import WORKTREE_ROOT_DISPLAY
 from autoevolve.worktree import ExperimentWorktreeManager
+
+app = typer.Typer()
 
 
 @app.command(
