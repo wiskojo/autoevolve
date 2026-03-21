@@ -4,15 +4,6 @@ from dataclasses import dataclass
 from enum import Enum
 
 CONTINUE_HOOK_MESSAGE = "continue"
-SHELL_CONTINUE_HOOK_COMMAND = f"printf '%s\\n' {CONTINUE_HOOK_MESSAGE!r} >&2; exit 2"
-GEMINI_CONTINUE_HOOK_COMMAND = (
-    "printf '%s\\n' "
-    f"{json.dumps({'decision': 'deny', 'reason': CONTINUE_HOOK_MESSAGE}, separators=(',', ':'))!r}"
-)
-CODEX_CONTINUE_HOOK_COMMAND = (
-    "cat >/dev/null; printf '%s\\n' "
-    f"{json.dumps({'decision': 'block', 'reason': CONTINUE_HOOK_MESSAGE}, separators=(',', ':'))!r}"
-)
 
 
 class Harness(str, Enum):
@@ -40,7 +31,7 @@ class HarnessSpec:
         return bool(self.continue_hook_files)
 
 
-def _parse_json_object_file(existing_text: str | None) -> dict[str, object]:
+def _load_json_object(existing_text: str | None) -> dict[str, object]:
     if existing_text is None:
         return {}
     parsed = json.loads(existing_text)
@@ -62,33 +53,15 @@ def _append_hook_entry(
     return hooks
 
 
-def _build_claude_continue_hook_settings(existing_text: str | None) -> str:
-    settings = _parse_json_object_file(existing_text)
-    hook_entry = {"hooks": [{"type": "command", "command": SHELL_CONTINUE_HOOK_COMMAND}]}
-    settings["hooks"] = _append_hook_entry(settings.get("hooks"), "Stop", hook_entry)
+def _build_hook_file(
+    existing_text: str | None, *, event_name: str, command: str, name: str | None = None
+) -> str:
+    settings = _load_json_object(existing_text)
+    hook = {"type": "command", "command": command}
+    if name is not None:
+        hook["name"] = name
+    settings["hooks"] = _append_hook_entry(settings.get("hooks"), event_name, {"hooks": [hook]})
     return f"{json.dumps(settings, indent=2)}\n"
-
-
-def _build_gemini_continue_hook_settings(existing_text: str | None) -> str:
-    settings = _parse_json_object_file(existing_text)
-    hook_entry = {
-        "hooks": [
-            {
-                "name": "autoevolve-continue",
-                "type": "command",
-                "command": GEMINI_CONTINUE_HOOK_COMMAND,
-            }
-        ]
-    }
-    settings["hooks"] = _append_hook_entry(settings.get("hooks"), "AfterAgent", hook_entry)
-    return f"{json.dumps(settings, indent=2)}\n"
-
-
-def _build_codex_hooks(existing_text: str | None) -> str:
-    hooks_document = _parse_json_object_file(existing_text)
-    hook_entry = {"hooks": [{"type": "command", "command": CODEX_CONTINUE_HOOK_COMMAND}]}
-    hooks_document["hooks"] = _append_hook_entry(hooks_document.get("hooks"), "Stop", hook_entry)
-    return f"{json.dumps(hooks_document, indent=2)}\n"
 
 
 def _build_codex_config(existing_text: str | None) -> str:
@@ -111,7 +84,11 @@ HARNESS_SPECS = {
         continue_hook_files=(
             ContinueHookFileSpec(
                 path=".claude/settings.json",
-                build_contents=_build_claude_continue_hook_settings,
+                build_contents=lambda existing_text: _build_hook_file(
+                    existing_text,
+                    event_name="Stop",
+                    command=f"printf '%s\\n' {CONTINUE_HOOK_MESSAGE!r} >&2; exit 2",
+                ),
             ),
         ),
     ),
@@ -126,7 +103,14 @@ HARNESS_SPECS = {
             ),
             ContinueHookFileSpec(
                 path=".codex/hooks.json",
-                build_contents=_build_codex_hooks,
+                build_contents=lambda existing_text: _build_hook_file(
+                    existing_text,
+                    event_name="Stop",
+                    command=(
+                        "cat >/dev/null; printf '%s\\n' "
+                        f"{json.dumps({'decision': 'block', 'reason': CONTINUE_HOOK_MESSAGE}, separators=(',', ':'))!r}"
+                    ),
+                ),
             ),
         ),
     ),
@@ -137,7 +121,15 @@ HARNESS_SPECS = {
         continue_hook_files=(
             ContinueHookFileSpec(
                 path=".gemini/settings.json",
-                build_contents=_build_gemini_continue_hook_settings,
+                build_contents=lambda existing_text: _build_hook_file(
+                    existing_text,
+                    event_name="AfterAgent",
+                    command=(
+                        "printf '%s\\n' "
+                        f"{json.dumps({'decision': 'deny', 'reason': CONTINUE_HOOK_MESSAGE}, separators=(',', ':'))!r}"
+                    ),
+                    name="autoevolve-continue",
+                ),
             ),
         ),
     ),

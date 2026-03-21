@@ -138,7 +138,7 @@ def test_init_gemini_continue_hook(repo: RepoFixture) -> None:
                         {
                             "name": "autoevolve-continue",
                             "type": "command",
-                            "command": "printf '%s\\n' '{\"decision\":\"deny\",\"reason\":\"continue\"}'",
+                            "command": 'printf \'%s\\n\' \'{"decision":"deny","reason":"continue"}\'',
                         }
                     ]
                 }
