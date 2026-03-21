@@ -1,3 +1,5 @@
+import json
+
 from inline_snapshot import snapshot
 
 from tests.e2e.conftest import RepoFixture
@@ -123,3 +125,23 @@ skipped:
   - PROGRAM.md
 """
     )
+
+
+def test_init_gemini_continue_hook(repo: RepoFixture) -> None:
+    repo.run("init", "--harness", "gemini", "--continue-hook", "--yes")
+    settings = json.loads((repo.root / ".gemini" / "settings.json").read_text(encoding="utf-8"))
+    assert settings == {
+        "hooks": {
+            "AfterAgent": [
+                {
+                    "hooks": [
+                        {
+                            "name": "autoevolve-continue",
+                            "type": "command",
+                            "command": "printf '%s\\n' '{\"decision\":\"deny\",\"reason\":\"continue\"}'",
+                        }
+                    ]
+                }
+            ]
+        }
+    }

@@ -5,6 +5,10 @@ from enum import Enum
 
 CONTINUE_HOOK_MESSAGE = "continue"
 SHELL_CONTINUE_HOOK_COMMAND = f"printf '%s\\n' {CONTINUE_HOOK_MESSAGE!r} >&2; exit 2"
+GEMINI_CONTINUE_HOOK_COMMAND = (
+    "printf '%s\\n' "
+    f"{json.dumps({'decision': 'deny', 'reason': CONTINUE_HOOK_MESSAGE}, separators=(',', ':'))!r}"
+)
 CODEX_CONTINUE_HOOK_COMMAND = (
     "cat >/dev/null; printf '%s\\n' "
     f"{json.dumps({'decision': 'block', 'reason': CONTINUE_HOOK_MESSAGE}, separators=(',', ':'))!r}"
@@ -72,7 +76,7 @@ def _build_gemini_continue_hook_settings(existing_text: str | None) -> str:
             {
                 "name": "autoevolve-continue",
                 "type": "command",
-                "command": SHELL_CONTINUE_HOOK_COMMAND,
+                "command": GEMINI_CONTINUE_HOOK_COMMAND,
             }
         ]
     }
