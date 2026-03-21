@@ -169,6 +169,31 @@ def test_init_claude_continue_hook(repo: RepoFixture) -> None:
     }
 
 
+def test_init_codex_continue_hook(repo: RepoFixture) -> None:
+    repo.run("init", "--harness", "codex", "--continue-hook", "--yes")
+    config = (repo.root / ".codex" / "config.toml").read_text(encoding="utf-8")
+    assert config == "[features]\ncodex_hooks = true\n"
+
+    hooks = json.loads((repo.root / ".codex" / "hooks.json").read_text(encoding="utf-8"))
+    assert hooks == {
+        "hooks": {
+            "Stop": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": (
+                                "cat >/dev/null; printf '%s\\n' "
+                                '\'{"decision":"block","reason":"continue"}\''
+                            ),
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+
 def test_init_claude_next_step(repo: RepoFixture) -> None:
     repo.write_problem()
     result = repo.run("init", "--harness", "claude", "--yes")
@@ -191,3 +216,13 @@ Open Claude Code and type:
   /autoevolve
 """
     )
+
+
+def test_init_other_rejects_continue_hook(repo: RepoFixture) -> None:
+    result = repo.run("init", "--harness", "other", "--continue-hook", "--yes", expect_failure=True)
+    assert result.stderr == snapshot('Continue hooks are not supported for harness "other".\n')
+
+
+def test_update_requires_existing_prompt(repo: RepoFixture) -> None:
+    result = repo.run("update", expect_failure=True)
+    assert result.stderr == snapshot("No prompt files found. Run autoevolve init first.\n")

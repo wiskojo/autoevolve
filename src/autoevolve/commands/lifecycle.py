@@ -58,7 +58,7 @@ def record() -> None:
     ),
 )
 def clean(
-    name: str | None = None,
+    name: Annotated[str | None, typer.Argument(help="Optional managed experiment name.")] = None,
     force: Annotated[
         bool,
         typer.Option("-f", "--force", help="Remove dirty or missing managed worktrees too."),

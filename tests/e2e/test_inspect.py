@@ -3,6 +3,18 @@ from inline_snapshot import snapshot
 from tests.e2e.conftest import RepoFixture
 
 
+def test_status_lists_unmanaged_linked_worktrees(repo: RepoFixture) -> None:
+    repo.init_other()
+    other_worktree = repo.home / "scratch"
+    repo.git("worktree", "add", "-b", "scratch", str(other_worktree))
+    (other_worktree / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    result = repo.run("status")
+    normalized = repo.normalize(result.stdout, other_worktree)
+    assert "other linked worktrees:" in normalized
+    assert "<PATH_1> [scratch, unmanaged, dirty]" in normalized
+
+
 def test_status(history_repo: RepoFixture) -> None:
     history_repo.git("checkout", "cross/hybrid-final")
     result = history_repo.run("status")
@@ -25,6 +37,11 @@ ongoing experiments (managed worktrees):
   (none)
 """
     )
+
+
+def test_log_empty_repo(repo: RepoFixture) -> None:
+    result = repo.run("log")
+    assert result.stdout == snapshot("No experiments found.\n")
 
 
 def test_log(history_repo: RepoFixture) -> None:
@@ -207,3 +224,14 @@ edges:
   git  <SHA_11> -> <SHA_10>
 """
     )
+
+
+def test_lineage_rejects_invalid_depth(history_repo: RepoFixture) -> None:
+    result = history_repo.run(
+        "lineage",
+        "cross/hybrid-final",
+        "--depth",
+        "0",
+        expect_failure=True,
+    )
+    assert "Depth must be a positive integer or 'all'." in result.stderr
