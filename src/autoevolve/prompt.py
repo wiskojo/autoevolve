@@ -37,12 +37,21 @@ PROMPT_BODY_TEMPLATE = dedent(
 
     The idea is that you are a completely autonomous orchestrator trying things out. If an approach works, keep it. If it doesn't, still keep it. Continue advancing experiments based on what appears most promising while running parallel work toward the goal in `{problem}`.
 
+    **SUBAGENTS**: This autonomous loop only applies to the top-level orchestrator. Delegated subagents or workers should execute only their assigned experiment, record results, and then stop rather than starting or continuing the forever loop. If you are a subagent, `LOOP FOREVER` and any instructions to continue autonomously apply only to the top-level orchestrator, not to you.
+
     Recommendations:
 
+    - One commit = one atomic expriment. Every meaningful experiment should be recorded, including both improvements and regressions. The goal is to preserve the full search history, not just the winners.
     - If you try an idea or obtain some intermediate result, however small (within reason), consider committing it as an experiment to document it and preserve traceability.
-    - Every meaningful experiment should be recorded, including both improvements and regressions. The goal is to preserve the full search history, not just the winners.
     - Prefer fan-out over a single linear chain. Use `autoevolve start` from the current commit, any promising experiment commit, or another intentionally chosen ref, and continue exploring outward through committed experiments rather than one long-lived uncommitted session.
     - Keep the filesystem tidy. Put new files, intermediate results, and other artifacts in the repository itself, or preferably in managed worktrees under `{managed_worktree_root}`, and clean them up before committing the experiment. Do not scatter files across `/tmp`, `/private`, cache directories, your home directory, or other ad hoc paths unless the task explicitly requires it. Managed worktrees should be temporary, and once you are done with them, clean them up with the autoevolve lifecycle commands.
+    - With `autoevolve start` putting things in worktrees, you can work on multiple indepednent streams of work and research directions concurrently. If the problem and resource allows it, you can parallilize aggressively to evalaute multiple streams of ideas at the same time. You can also keep yourself unblocked as you delegate tasks to subagents to work on exploring different research directions and prepare for what to do next after those experiments are completed.
+
+    Parallelization:
+
+    - When the problem and available resources allow it, you can scale horizontally by working on multiple independent streams and exploring different research directions concurrently.
+    - When running experiments concurrently, prefer separate worktrees managed by autoevolve lifecycle commands so each workstream stays isolated and conflicts are minimized.
+    - If it improves efficiency, you can delegate work to subagents and manage them so they can execute tasks or explore different research directions independently.
 
     ## How autoevolve works
 
