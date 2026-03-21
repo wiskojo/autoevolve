@@ -102,7 +102,9 @@ def test_best_rejects_conflicting_objectives(history_repo: RepoFixture) -> None:
 
 def test_best_reports_missing_numeric_metric(history_repo: RepoFixture) -> None:
     result = history_repo.run("best", "--max", "unknown_metric")
-    assert result.stdout == snapshot('No experiments found with a numeric "unknown_metric" metric.\n')
+    assert result.stdout == snapshot(
+        'No experiments found with a numeric "unknown_metric" metric.\n'
+    )
 
 
 def test_pareto(history_repo: RepoFixture) -> None:
