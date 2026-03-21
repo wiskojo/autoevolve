@@ -12,9 +12,7 @@ from autoevolve.commands.lifecycle import app as lifecycle_app
 
 
 class AutoevolveGroup(TyperGroup):
-    def format_commands(
-        self, ctx: click.Context, formatter: click.HelpFormatter
-    ) -> None:
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         command_names = self.list_commands(ctx)
         sections: dict[str, list[tuple[str, str]]] = {
             title: [] for title in ("Human", "Lifecycle", "Inspect", "Analytics")
@@ -49,18 +47,14 @@ class AutoevolveGroup(TyperGroup):
 app = typer.Typer(
     cls=AutoevolveGroup,
     help="Git-backed experiment loops for coding agents.",
-    epilog="\n".join(
-        [
-            "Examples:",
-            '  autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844',
-            "  autoevolve record",
-            "  autoevolve log",
-            "  autoevolve recent --limit 5",
-            "  autoevolve best --max benchmark_score --limit 5",
-            "",
-            'Run "autoevolve <command> --help" for command-specific details.',
-        ]
-    ),
+    epilog="""Examples:
+  autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844
+  autoevolve record
+  autoevolve log
+  autoevolve recent --limit 5
+  autoevolve best --max benchmark_score --limit 5
+
+Run "autoevolve <command> --help" for command-specific details.""",
     invoke_without_command=True,
     add_completion=False,
     rich_markup_mode=None,
