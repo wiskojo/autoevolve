@@ -21,7 +21,6 @@ from autoevolve.constants import (
     ROOT_FILES,
     format_home_relative_path,
 )
-from autoevolve.errors import AutoevolveError
 from autoevolve.harnesses import HARNESS_NAMES, parse_harness
 from autoevolve.models import (
     GraphDirection,
@@ -451,9 +450,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except click.ClickException as error:
         error.show()
         return error.exit_code
-    except AutoevolveError as error:
-        click.echo(f"autoevolve: {error}", err=True)
-        return 1
     except Exception as error:
         message = error.args[0] if error.args else str(error)
         click.echo(f"autoevolve: {message}", err=True)
