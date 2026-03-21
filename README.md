@@ -1,8 +1,8 @@
 # autoevolve
 
-`autoevolve` lets you use your existing coding agent in a simple git-backed experiment loop.
+`autoevolve` lets your coding agents run simple git-backed experiment loops.
 
-Run it inside an existing project, let it set up the files your coding agent needs, and then let the agent iterate through experiments as git commits.
+Run it inside an existing project, let it set up the files your coding agent needs, and then watch your agent iterate and branch through experiments as git commits.
 
 ## Install
 
@@ -20,7 +20,7 @@ autoevolve init
 
 `autoevolve init` walks you through the setup for your coding harness and problem:
 
-- a `SKILL.md` or `PROGRAM.md`: the instructions your coding agent reads to use autoevolve
+- `SKILL.md` or `PROGRAM.md`: the instructions your coding agent reads to use `autoevolve`
 - `PROBLEM.md`: the goal, metric, constraints, and validation setup for your problem
 
 From there, your agent works in the repo as usual. Experiment commits will include:
