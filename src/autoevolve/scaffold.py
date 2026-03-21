@@ -4,7 +4,7 @@ from autoevolve.git import find_repo_root
 from autoevolve.harnesses import HARNESS_SPECS, Harness, get_harness_spec
 from autoevolve.models.experiment import PromptFile
 from autoevolve.problem import parse_problem_spec
-from autoevolve.prompt import build_harness_prompt, build_problem_template
+from autoevolve.prompt import build_harness_skill_prompt, build_problem_template
 from autoevolve.repository import (
     EXPERIMENT_FILE,
     JOURNAL_FILE,
@@ -21,11 +21,13 @@ class Scaffolder:
         spec = get_harness_spec(harness)
         written: list[str] = []
         if not (self.root / PROBLEM_FILE).exists():
-            (self.root / PROBLEM_FILE).write_text(build_problem_template(), encoding="utf-8")
+            (self.root / PROBLEM_FILE).write_text(
+                build_problem_template(), encoding="utf-8"
+            )
             written.append(PROBLEM_FILE)
         prompt_path = self.root / spec.prompt_path
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        prompt_path.write_text(build_harness_prompt(harness), encoding="utf-8")
+        prompt_path.write_text(build_harness_skill_prompt(harness), encoding="utf-8")
         written.append(spec.prompt_path)
         if continue_hook:
             for file_spec in spec.continue_hook_files:
@@ -47,7 +49,9 @@ class Scaffolder:
     def update_prompt(self, prompt_file: PromptFile) -> None:
         harness = Harness(prompt_file.harness)
         prompt_file.path.parent.mkdir(parents=True, exist_ok=True)
-        prompt_file.path.write_text(build_harness_prompt(harness), encoding="utf-8")
+        prompt_file.path.write_text(
+            build_harness_skill_prompt(harness), encoding="utf-8"
+        )
 
     def validate(self) -> list[str]:
         problems: list[str] = []
