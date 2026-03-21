@@ -295,7 +295,7 @@ def run_validate() -> None:
         for problem in problems:
             click.echo(f"FAIL: {problem}")
         raise SystemExit(1)
-    click.echo("OK: repository matches the autoevolve protocol.")
+    click.echo("OK: repository is ready for autoevolve.")
     if not has_experiment_files(repo_root):
         click.echo(
             "No current experiment record found. Add "

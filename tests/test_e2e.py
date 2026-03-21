@@ -13,7 +13,7 @@ from dirty_equals import IsPartialDict, IsStr
 from inline_snapshot import snapshot
 
 from autoevolve.harnesses import Harness
-from autoevolve.prompt import build_harness_prompt, build_protocol_body
+from autoevolve.prompt import build_harness_prompt, build_prompt_body
 from tests.experiments import (
     EXPERIMENTS,
     build_experiment_object,
@@ -392,7 +392,7 @@ def test_legacy_commands_removed() -> None:
         assert_click_error(result.stderr, f"No such command '{command}'.")
 
 
-def test_metric_protocol_validation() -> None:
+def test_metric_validation() -> None:
     repo_path = init_repo_from_fixture()
     run(
         ["init", "--harness", "other", "--yes"],
@@ -537,8 +537,8 @@ Files updated:
     assert program_path.read_text(encoding="utf-8") == build_harness_prompt(Harness.OTHER)
 
 
-def test_protocol_prompt_lifecycle_guidance() -> None:
-    prompt = build_protocol_body()
+def test_prompt_lifecycle_guidance() -> None:
+    prompt = build_prompt_body()
     assert "autoevolve log" in prompt
     assert "autoevolve lineage" in prompt
     assert "autoevolve start <name> <summary> [--from <ref>]" in prompt
@@ -1365,7 +1365,7 @@ def test_harness_init_variants(harness: str, skill_path: str, handoff_prompt: st
     result = run(["init", "--harness", harness, "--yes"], cwd=repo_path)
     skill_text = Path(repo_path, skill_path).read_text(encoding="utf-8")
     assert skill_text.startswith("---\nname: autoevolve\ndescription: ")
-    assert "\n# autoevolve protocol\n" in skill_text
+    assert "\n# autoevolve\n" in skill_text
     assert f"For example:\n  {handoff_prompt}\n" in result.stdout
 
 

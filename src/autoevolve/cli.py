@@ -159,7 +159,7 @@ def init_command(
     short_help="Check that the repo is ready for autoevolve.",
     help=(
         "Check that the repo is ready for autoevolve.\n\n"
-        "validate checks the required protocol files and validates the current "
+        "validate checks the required autoevolve files and validates the current "
         "experiment record when one is present."
     ),
 )
