@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
 
 import click
 
@@ -82,7 +81,7 @@ def resolve_best_objective(
 
     try:
         primary_metric = parse_problem_primary_metric(read_text_file(repo_root, ROOT_FILES.problem))
-    except Exception as error:
+    except ValueError as error:
         raise AutoevolveError(
             "best requires an explicit objective, or a valid PROBLEM.md primary metric."
         ) from error
@@ -254,8 +253,8 @@ def run_pareto(
         )
     ]
 
-    def pareto_key(record: ExperimentRecord) -> tuple[Any, ...]:
-        values: list[Any] = []
+    def pareto_key(record: ExperimentRecord) -> tuple[int | float, ...]:
+        values: list[int | float] = []
         for objective in objectives:
             metric_value = get_record_numeric_metric_value(record, objective.metric)
             if metric_value is None:

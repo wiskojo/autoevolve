@@ -36,6 +36,32 @@ class ExperimentRecord:
 
 
 @dataclass(frozen=True)
+class BranchTip:
+    name: str
+    sha: str
+    subject: str
+
+
+@dataclass(frozen=True)
+class WorktreeInfo:
+    path: str
+    head: str
+    short_head: str
+    branch: str | None
+    is_current: bool
+    is_primary: bool
+    dirty: bool | None
+    is_missing: bool
+    is_managed_experiment: bool
+
+
+@dataclass(frozen=True)
+class PromptFile:
+    harness: str
+    relative_path: str
+
+
+@dataclass(frozen=True)
 class PrimaryMetricSpec:
     direction: MetricDirection
     metric: str

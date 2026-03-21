@@ -212,13 +212,13 @@ def run_update(yes: bool = False) -> None:
     click.echo(f"Repository\n{repo_root}")
     click.echo("Detected prompts")
     for prompt_file in prompt_files:
-        click.echo(f"- {prompt_file['relative_path']} ({prompt_file['harness']})")
+        click.echo(f"- {prompt_file.relative_path} ({prompt_file.harness})")
 
     updated_files: list[str] = []
     skipped_files: list[str] = []
     for prompt_file in prompt_files:
-        relative_path = prompt_file["relative_path"]
-        harness = parse_harness(prompt_file["harness"])
+        relative_path = prompt_file.relative_path
+        harness = parse_harness(prompt_file.harness)
         wrote = write_file_with_confirmation(
             repo_root,
             relative_path,
@@ -248,7 +248,7 @@ def run_validate() -> None:
             primary_metric = parse_problem_primary_metric(
                 read_text_file(repo_root, ROOT_FILES.problem)
             )
-        except Exception as error:
+        except ValueError as error:
             problems.append(str(error))
 
     if not find_prompt_files(repo_root):

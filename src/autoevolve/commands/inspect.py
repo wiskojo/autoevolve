@@ -4,15 +4,14 @@ import json
 import os
 import re
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import cmp_to_key
-from typing import Any
 
 import click
 
 from autoevolve.commands.shared import (
     apply_limit,
-    build_experiment_object_for_output,
     build_tip_map,
     get_experiment_records,
     get_managed_experiment_name,
@@ -37,7 +36,9 @@ from autoevolve.models import (
     ExperimentRecord,
     GraphDirection,
     GraphEdges,
+    MetricValue,
     PrimaryMetricSpec,
+    WorktreeInfo,
 )
 from autoevolve.problem import parse_problem_primary_metric
 from autoevolve.utils import (
@@ -52,40 +53,119 @@ from autoevolve.utils import (
 )
 
 
-def format_worktree_state(worktree: dict[str, Any]) -> str:
-    labels = [worktree["branch"] or "(detached HEAD)"]
-    if worktree["isCurrent"]:
+@dataclass(frozen=True)
+class CurrentRecordState:
+    kind: str
+    problems: list[str]
+
+
+@dataclass(frozen=True)
+class TipStatusEntry:
+    sha: str
+    branches: list[str]
+    date: str | None
+    subject: str
+    summary: str | None
+    metrics: dict[str, MetricValue] | None
+    problems: list[str]
+    primary_metric_value: int | float | None
+
+    @property
+    def short_sha(self) -> str:
+        return short_sha(self.sha)
+
+
+@dataclass(frozen=True)
+class RecentTrend:
+    delta: float
+    sample_size: int
+    span_ms: int
+
+
+@dataclass(frozen=True)
+class WorktreeCounts:
+    clean: int
+    dirty: int
+    missing: int
+    total: int
+
+
+@dataclass(frozen=True)
+class ChangedPath:
+    status: str
+    path: str
+    previous_path: str | None = None
+
+
+@dataclass(frozen=True)
+class MetricDelta:
+    left: MetricValue
+    right: MetricValue
+    delta: float | None
+
+
+@dataclass(frozen=True)
+class ReferenceDiff:
+    common: list[str]
+    left_only: list[str]
+    right_only: list[str]
+
+
+@dataclass(frozen=True)
+class GitRelationship:
+    relationship: str
+    merge_base: str | None
+    shared_parents: list[str]
+
+
+@dataclass(frozen=True)
+class LineageEdge:
+    kind: str
+    source: str
+    target: str
+    why: str | None = None
+
+
+@dataclass(frozen=True)
+class LineageGraph:
+    node_order: list[str]
+    edges: list[LineageEdge]
+
+
+def format_worktree_state(worktree: WorktreeInfo) -> str:
+    labels = [worktree.branch or "(detached HEAD)"]
+    if worktree.is_current:
         labels.append("current")
-    if worktree["isPrimary"]:
+    if worktree.is_primary:
         labels.append("primary")
-    if worktree["isManagedExperiment"]:
+    if worktree.is_managed_experiment:
         labels.append("managed")
-    elif not worktree["isPrimary"]:
+    elif not worktree.is_primary:
         labels.append("unmanaged")
-    labels.append("missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean")
-    return f"{worktree['path']} [{', '.join(labels)}] @ {worktree['shortHead']}"
+    labels.append("missing" if worktree.is_missing else "dirty" if worktree.dirty else "clean")
+    return f"{worktree.path} [{', '.join(labels)}] @ {worktree.short_head}"
 
 
-def format_managed_worktree_line(worktree: dict[str, Any]) -> str:
-    branch_name = worktree["branch"]
+def format_managed_worktree_line(worktree: WorktreeInfo) -> str:
+    branch_name = worktree.branch
     name = (
         get_managed_experiment_name(branch_name)
         if branch_name and is_managed_experiment_branch(branch_name)
-        else os.path.basename(worktree["path"])
+        else os.path.basename(worktree.path)
     )
-    state = "missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean"
-    return f"{name} @ {worktree['shortHead']} ({state})"
+    state = "missing" if worktree.is_missing else "dirty" if worktree.dirty else "clean"
+    return f"{name} @ {worktree.short_head} ({state})"
 
 
-def summarize_worktree_counts(worktrees: list[dict[str, Any]]) -> dict[str, int]:
-    dirty = len([worktree for worktree in worktrees if worktree["dirty"]])
-    missing = len([worktree for worktree in worktrees if worktree["isMissing"]])
-    return {
-        "clean": len(worktrees) - dirty - missing,
-        "dirty": dirty,
-        "missing": missing,
-        "total": len(worktrees),
-    }
+def summarize_worktree_counts(worktrees: list[WorktreeInfo]) -> WorktreeCounts:
+    dirty = len([worktree for worktree in worktrees if worktree.dirty])
+    missing = len([worktree for worktree in worktrees if worktree.is_missing])
+    return WorktreeCounts(
+        clean=len(worktrees) - dirty - missing,
+        dirty=dirty,
+        missing=missing,
+        total=len(worktrees),
+    )
 
 
 def format_relative_time(iso_date: str) -> str:
@@ -120,24 +200,23 @@ def format_signed_number(value: float) -> str:
 
 
 def format_experiment_summary(
-    record: dict[str, Any],
+    sha: str,
+    date: str,
+    summary: str | None,
+    metrics: dict[str, MetricValue] | None,
     primary_metric: PrimaryMetricSpec | None,
     extra_label: str = "",
 ) -> str:
     metric_summary = ""
-    if (
-        primary_metric is not None
-        and record.get("metrics") is not None
-        and is_number(record["metrics"].get(primary_metric.metric))
-    ):
-        metric_summary = (
-            f"{primary_metric.metric}={json.dumps(record['metrics'][primary_metric.metric])}"
-        )
-    elif record.get("metrics") is not None:
-        metric_summary = format_metric_summary(record["metrics"])
-    detail_parts = [part for part in [extra_label, format_relative_time(record["date"])] if part]
+    if primary_metric is not None and metrics is not None:
+        primary_value = metrics.get(primary_metric.metric)
+        if is_number(primary_value):
+            metric_summary = f"{primary_metric.metric}={json.dumps(primary_value)}"
+    elif metrics is not None:
+        metric_summary = format_metric_summary(metrics)
+    detail_parts = [part for part in [extra_label, format_relative_time(date)] if part]
     detail = f"  ({', '.join(detail_parts)})" if detail_parts else ""
-    return f"{record['short_sha']}{f'  {metric_summary}' if metric_summary else ''}{detail}"
+    return f"{short_sha(sha)}{f'  {metric_summary}' if metric_summary else ''}{detail}"
 
 
 def truncate_status_summary(summary: str, max_length: int = 120) -> str:
@@ -148,11 +227,11 @@ def truncate_status_summary(summary: str, max_length: int = 120) -> str:
 
 
 def format_recent_experiment_line(
-    record: dict[str, Any], primary_metric: PrimaryMetricSpec | None
+    record: ExperimentRecord, primary_metric: PrimaryMetricSpec | None
 ) -> str:
-    summary = truncate_status_summary(record["summary"]) if record.get("summary") else ""
+    summary = truncate_status_summary(record.parsed.summary) if record.parsed else ""
     summary_suffix = f" | {summary}" if summary else ""
-    return f"{format_experiment_summary(record, primary_metric)}{summary_suffix}"
+    return f"{format_experiment_summary(record.sha, record.date, record.parsed.summary if record.parsed else None, record.parsed.metrics if record.parsed else None, primary_metric)}{summary_suffix}"
 
 
 def find_project_best_experiment_record(
@@ -188,7 +267,7 @@ def find_recent_experiment_records(
 
 def build_recent_trend(
     records: list[ExperimentRecord], primary_metric: PrimaryMetricSpec | None
-) -> dict[str, Any] | None:
+) -> RecentTrend | None:
     if primary_metric is None:
         return None
     sample = find_recent_experiment_records(
@@ -222,11 +301,11 @@ def build_recent_trend(
                 * 1000
             ),
         )
-    return {
-        "delta": newest_value - oldest_value,
-        "sampleSize": len(sample),
-        "spanMs": span_ms,
-    }
+    return RecentTrend(
+        delta=float(newest_value - oldest_value),
+        sample_size=len(sample),
+        span_ms=span_ms,
+    )
 
 
 def format_duration_ms(duration_ms: int) -> str:
@@ -247,7 +326,7 @@ def format_duration_ms(duration_ms: int) -> str:
 
 
 def _build_primary_metric_problems(
-    metrics: dict[str, Any] | None, primary_metric: PrimaryMetricSpec | None
+    metrics: dict[str, MetricValue] | None, primary_metric: PrimaryMetricSpec | None
 ) -> list[str]:
     if primary_metric is None:
         return []
@@ -265,52 +344,46 @@ def _build_tip_status_entry(
     date: str | None,
     subject: str,
     summary: str | None,
-    metrics: dict[str, Any] | None,
+    metrics: dict[str, MetricValue] | None,
     primary_metric: PrimaryMetricSpec | None,
     problems: list[str],
-) -> dict[str, Any]:
+) -> TipStatusEntry:
     primary_metric_value = None
     if primary_metric is not None and metrics is not None:
         candidate = metrics.get(primary_metric.metric)
         if is_number(candidate):
             primary_metric_value = candidate
-    return {
-        "branches": branches,
-        "date": date,
-        "metrics": metrics,
-        "primaryMetricValue": primary_metric_value,
-        "problems": problems,
-        "sha": sha,
-        "shortSha": short_sha(sha),
-        "subject": subject,
-        "summary": summary,
-    }
+    return TipStatusEntry(
+        sha=sha,
+        branches=branches,
+        date=date,
+        subject=subject,
+        summary=summary,
+        metrics=metrics,
+        problems=problems,
+        primary_metric_value=primary_metric_value,
+    )
 
 
 def inspect_current_record_state(
     repo_root: str, primary_metric: PrimaryMetricSpec | None
-) -> dict[str, Any]:
+) -> CurrentRecordState:
     has_journal = file_exists(repo_root, ROOT_FILES.journal)
     has_experiment = file_exists(repo_root, ROOT_FILES.experiment)
     problems: list[str] = []
 
     if not has_journal and not has_experiment:
-        return {
-            "kind": "missing",
-            "problems": [
-                (
-                    "no current experiment record; add "
-                    f"{ROOT_FILES.journal} and {ROOT_FILES.experiment}"
-                )
-            ],
-        }
+        return CurrentRecordState(
+            "missing",
+            [f"no current experiment record; add {ROOT_FILES.journal} and {ROOT_FILES.experiment}"],
+        )
 
     if not has_journal or not has_experiment:
         if not has_journal:
             problems.append(f"missing {ROOT_FILES.journal}")
         if not has_experiment:
             problems.append(f"missing {ROOT_FILES.experiment}")
-        return {"kind": "incomplete", "problems": problems}
+        return CurrentRecordState("incomplete", problems)
 
     journal_text = read_text_file(repo_root, ROOT_FILES.journal).strip()
     if not journal_text:
@@ -323,16 +396,16 @@ def inspect_current_record_state(
         problems.append(f"invalid {ROOT_FILES.experiment}: {error}")
 
     if problems:
-        return {"kind": "invalid", "problems": problems}
-    return {"kind": "recorded", "problems": []}
+        return CurrentRecordState("invalid", problems)
+    return CurrentRecordState("recorded", [])
 
 
-def _get_commit_metadata(repo_root: str, ref: str) -> dict[str, str]:
+def _get_commit_metadata(repo_root: str, ref: str) -> tuple[str, str]:
     output = run_git(repo_root, ["show", "-s", "--format=%cI%x09%s", ref]).strip()
     parts = output.split("\t", 1)
     if len(parts) != 2 or not parts[0]:
         raise AutoevolveError(f"Unexpected git show output: {output}")
-    return {"date": parts[0], "subject": parts[1]}
+    return parts[0], parts[1]
 
 
 def inspect_active_tip_entry(
@@ -341,7 +414,7 @@ def inspect_active_tip_entry(
     branches: list[str],
     record_map: dict[str, ExperimentRecord],
     primary_metric: PrimaryMetricSpec | None,
-) -> tuple[dict[str, Any], str]:
+) -> tuple[TipStatusEntry, str]:
     record = record_map.get(sha)
     if record is not None:
         problems: list[str] = []
@@ -382,13 +455,13 @@ def inspect_active_tip_entry(
             missing_problems.append(f"missing {ROOT_FILES.journal} at branch tip")
         if experiment_text is None:
             missing_problems.append(f"missing {ROOT_FILES.experiment} at branch tip")
-    metadata = _get_commit_metadata(repo_root, sha)
+    date, subject = _get_commit_metadata(repo_root, sha)
     return (
         _build_tip_status_entry(
             sha,
             branches,
-            metadata["date"],
-            metadata["subject"],
+            date,
+            subject,
             None,
             None,
             primary_metric,
@@ -399,13 +472,13 @@ def inspect_active_tip_entry(
 
 
 def _compare_tip_entries_by_metric(
-    left: dict[str, Any], right: dict[str, Any], primary_metric: PrimaryMetricSpec
+    left: TipStatusEntry, right: TipStatusEntry, primary_metric: PrimaryMetricSpec
 ) -> int:
-    left_value = left.get("primaryMetricValue")
-    right_value = right.get("primaryMetricValue")
+    left_value = left.primary_metric_value
+    right_value = right.primary_metric_value
     if left_value is None and right_value is None:
-        left_date = left.get("date") or ""
-        right_date = right.get("date") or ""
+        left_date = left.date or ""
+        right_date = right.date or ""
         if right_date > left_date:
             return 1
         if right_date < left_date:
@@ -416,9 +489,9 @@ def _compare_tip_entries_by_metric(
     if right_value is None:
         return -1
     if left_value == right_value:
-        if (right.get("date") or "") > (left.get("date") or ""):
+        if (right.date or "") > (left.date or ""):
             return 1
-        if (right.get("date") or "") < (left.get("date") or ""):
+        if (right.date or "") < (left.date or ""):
             return -1
         return 0
     if primary_metric.direction == "min":
@@ -427,21 +500,21 @@ def _compare_tip_entries_by_metric(
 
 
 def sort_tip_entries(
-    entries: list[dict[str, Any]], primary_metric: PrimaryMetricSpec | None
-) -> list[dict[str, Any]]:
-    def compare(left: dict[str, Any], right: dict[str, Any]) -> int:
+    entries: list[TipStatusEntry], primary_metric: PrimaryMetricSpec | None
+) -> list[TipStatusEntry]:
+    def compare(left: TipStatusEntry, right: TipStatusEntry) -> int:
         if primary_metric is not None:
             metric_comparison = _compare_tip_entries_by_metric(left, right, primary_metric)
             if metric_comparison != 0:
                 return metric_comparison
-        left_date = left.get("date") or ""
-        right_date = right.get("date") or ""
+        left_date = left.date or ""
+        right_date = right.date or ""
         if left_date and right_date and left_date != right_date:
             if right_date > left_date:
                 return 1
             return -1
-        left_branch = left.get("branches", [""])[0] if left.get("branches") else ""
-        right_branch = right.get("branches", [""])[0] if right.get("branches") else ""
+        left_branch = left.branches[0] if left.branches else ""
+        right_branch = right.branches[0] if right.branches else ""
         if left_branch < right_branch:
             return -1
         if left_branch > right_branch:
@@ -518,13 +591,11 @@ def build_git_child_map(parent_map: dict[str, list[str]]) -> dict[str, list[str]
 
 def build_incoming_reference_map(
     records: list[ExperimentRecord],
-) -> dict[str, list[dict[str, str]]]:
-    incoming_map: dict[str, list[dict[str, str]]] = {}
+) -> dict[str, list[tuple[str, str]]]:
+    incoming_map: dict[str, list[tuple[str, str]]] = {}
     for record in records:
         for reference in (record.parsed.references or []) if record.parsed else []:
-            incoming_map.setdefault(reference.commit, []).append(
-                {"from": record.sha, "why": reference.why}
-            )
+            incoming_map.setdefault(reference.commit, []).append((record.sha, reference.why))
     return incoming_map
 
 
@@ -537,58 +608,40 @@ def describe_git_relationship(
     left_sha: str,
     right_sha: str,
     git_parent_map: dict[str, list[str]],
-) -> dict[str, Any]:
+) -> GitRelationship:
     if left_sha == right_sha:
-        return {"mergeBase": left_sha, "relationship": "same", "sharedParents": []}
+        return GitRelationship("same", left_sha, [])
 
     right_parents = git_parent_map.get(right_sha, [])
     if left_sha in right_parents:
-        return {
-            "mergeBase": left_sha,
-            "relationship": "direct_parent_of_right",
-            "sharedParents": [],
-        }
+        return GitRelationship("direct_parent_of_right", left_sha, [])
 
     left_parents = git_parent_map.get(left_sha, [])
     if right_sha in left_parents:
-        return {
-            "mergeBase": right_sha,
-            "relationship": "direct_parent_of_left",
-            "sharedParents": [],
-        }
+        return GitRelationship("direct_parent_of_left", right_sha, [])
 
     shared_parents = sorted(parent for parent in left_parents if parent in right_parents)
     if shared_parents:
-        return {
-            "mergeBase": _get_merge_base(repo_root, left_sha, right_sha),
-            "relationship": "sibling",
-            "sharedParents": shared_parents,
-        }
+        return GitRelationship(
+            "sibling", _get_merge_base(repo_root, left_sha, right_sha), shared_parents
+        )
 
     merge_base = _get_merge_base(repo_root, left_sha, right_sha)
     if merge_base == left_sha:
-        return {
-            "mergeBase": merge_base,
-            "relationship": "left_ancestor_of_right",
-            "sharedParents": [],
-        }
+        return GitRelationship("left_ancestor_of_right", merge_base, [])
     if merge_base == right_sha:
-        return {
-            "mergeBase": merge_base,
-            "relationship": "right_ancestor_of_left",
-            "sharedParents": [],
-        }
-    return {"mergeBase": merge_base, "relationship": "diverged", "sharedParents": []}
+        return GitRelationship("right_ancestor_of_left", merge_base, [])
+    return GitRelationship("diverged", merge_base, [])
 
 
-def build_changed_paths(repo_root: str, left_sha: str, right_sha: str) -> list[dict[str, Any]]:
+def build_changed_paths(repo_root: str, left_sha: str, right_sha: str) -> list[ChangedPath]:
     output = run_git(
         repo_root,
         ["diff", "--name-status", left_sha, right_sha, *code_diff_pathspec_args()],
     ).strip()
     if not output:
         return []
-    changed_paths: list[dict[str, Any]] = []
+    changed_paths: list[ChangedPath] = []
     for line in output.splitlines():
         parts = line.split("\t")
         status = parts[0] if parts else ""
@@ -598,22 +651,22 @@ def build_changed_paths(repo_root: str, left_sha: str, right_sha: str) -> list[d
             raise AutoevolveError(f"Unexpected git diff --name-status output: {line}")
         if status.startswith(("R", "C")):
             changed_paths.append(
-                {
-                    "path": second_path or first_path,
-                    "previousPath": first_path if second_path else None,
-                    "status": status,
-                }
+                ChangedPath(
+                    status=status,
+                    path=second_path or first_path,
+                    previous_path=first_path if second_path else None,
+                )
             )
             continue
-        changed_paths.append({"path": first_path, "previousPath": None, "status": status})
+        changed_paths.append(ChangedPath(status=status, path=first_path))
     return changed_paths
 
 
-def build_metric_diff(left: ExperimentRecord, right: ExperimentRecord) -> dict[str, Any]:
+def build_metric_diff(left: ExperimentRecord, right: ExperimentRecord) -> dict[str, MetricDelta]:
     metric_names = set(left.parsed.metrics.keys() if left.parsed and left.parsed.metrics else [])
     if right.parsed and right.parsed.metrics:
         metric_names.update(right.parsed.metrics.keys())
-    diff: dict[str, Any] = {}
+    diff: dict[str, MetricDelta] = {}
     for metric in sorted(metric_names):
         left_value = (
             left.parsed.metrics.get(metric) if left.parsed and left.parsed.metrics else None
@@ -621,217 +674,50 @@ def build_metric_diff(left: ExperimentRecord, right: ExperimentRecord) -> dict[s
         right_value = (
             right.parsed.metrics.get(metric) if right.parsed and right.parsed.metrics else None
         )
-        diff[metric] = {
-            "left": left_value,
-            "right": right_value,
-            "delta": right_value - left_value
+        diff[metric] = MetricDelta(
+            left=left_value,
+            right=right_value,
+            delta=right_value - left_value
             if is_number(left_value) and is_number(right_value)
             else None,
-        }
+        )
     return diff
 
 
-def build_reference_diff(left: ExperimentRecord, right: ExperimentRecord) -> dict[str, list[str]]:
+def build_reference_diff(left: ExperimentRecord, right: ExperimentRecord) -> ReferenceDiff:
     left_references = left.parsed.references if left.parsed and left.parsed.references else []
     right_references = right.parsed.references if right.parsed and right.parsed.references else []
     left_commits = {reference.commit for reference in left_references}
     right_commits = {reference.commit for reference in right_references}
-    return {
-        "common": sorted(left_commits & right_commits),
-        "leftOnly": sorted(left_commits - right_commits),
-        "rightOnly": sorted(right_commits - left_commits),
-    }
+    return ReferenceDiff(
+        common=sorted(left_commits & right_commits),
+        left_only=sorted(left_commits - right_commits),
+        right_only=sorted(right_commits - left_commits),
+    )
 
 
-def format_metric_value(value: Any) -> str:
+def format_metric_value(value: MetricValue) -> str:
     return "null" if value is None else json.dumps(value)
 
 
-def build_status_output(repo_root: str, records: list[ExperimentRecord]) -> dict[str, Any]:
-    branches = list_autoevolve_branches(repo_root)
-    tip_map = build_tip_map(branches)
-    record_map = {record.sha: record for record in records}
-    worktrees = list_repo_worktrees(repo_root)
-    primary_metric = None
-    if file_exists(repo_root, ROOT_FILES.problem):
-        try:
-            primary_metric = parse_problem_primary_metric(
-                read_text_file(repo_root, ROOT_FILES.problem)
-            )
-        except Exception:
-            primary_metric = None
-
-    active_recorded_tips: list[dict[str, Any]] = []
-    active_tips_missing_record: list[dict[str, Any]] = []
-    active_tips_needing_attention: list[dict[str, Any]] = []
-
-    for sha, tip_branches in tip_map.items():
-        inspected, kind = inspect_active_tip_entry(
-            repo_root, sha, tip_branches, record_map, primary_metric
-        )
-        if kind == "ok":
-            active_recorded_tips.append(inspected)
-        elif kind == "missing":
-            active_tips_missing_record.append(inspected)
-        else:
-            active_tips_needing_attention.append(inspected)
-
-    head_sha = get_head_sha(repo_root)
-    nearest_experiment_ancestor = find_git_experiment_ancestor(
-        repo_root, head_sha, {record.sha for record in records}
-    )
-    managed_worktrees = [
-        worktree
-        for worktree in worktrees
-        if not worktree["isPrimary"] and worktree["isManagedExperiment"]
-    ]
-    best_experiment = find_project_best_experiment_record(records, primary_metric)
-    recent_experiment_records = find_recent_experiment_records(records, 5)
-    latest_experiment = recent_experiment_records[0] if recent_experiment_records else None
-
-    return {
-        "activeRecordedTips": sort_tip_entries(active_recorded_tips, primary_metric),
-        "activeTipsMissingRecord": sort_tip_entries(active_tips_missing_record, None),
-        "activeTipsNeedingAttention": sort_tip_entries(active_tips_needing_attention, None),
-        "checkout": {
-            "branch": get_current_branch_label(repo_root),
-            "currentRecordState": inspect_current_record_state(repo_root, primary_metric),
-            "dirty": is_checkout_dirty(repo_root),
-            "head": head_sha,
-            "nearestExperimentAncestor": (
-                build_experiment_object_for_output(record_map[nearest_experiment_ancestor])
-                if nearest_experiment_ancestor in record_map
-                else None
-            ),
-            "shortHead": short_sha(head_sha),
-        },
-        "primaryMetric": (
-            {
-                "direction": primary_metric.direction,
-                "metric": primary_metric.metric,
-                "raw": primary_metric.raw,
-            }
-            if primary_metric
-            else None
-        ),
-        "project": {
-            "bestExperiment": (
-                build_experiment_object_for_output(best_experiment) if best_experiment else None
-            ),
-            "latestExperiment": (
-                build_experiment_object_for_output(latest_experiment) if latest_experiment else None
-            ),
-            "localBranchCounts": {
-                "invalid": len(active_tips_needing_attention),
-                "missingRecord": len(active_tips_missing_record),
-                "recorded": len(active_recorded_tips),
-                "total": len(active_recorded_tips)
-                + len(active_tips_missing_record)
-                + len(active_tips_needing_attention),
-            },
-            "managedWorktreeCounts": summarize_worktree_counts(managed_worktrees),
-            "recentExperiments": [
-                build_experiment_object_for_output(record) for record in recent_experiment_records
-            ],
-            "recentTrend": build_recent_trend(records, primary_metric),
-            "totalExperiments": len(records),
-        },
-        "worktrees": worktrees,
-    }
+def read_primary_metric(repo_root: str) -> PrimaryMetricSpec | None:
+    if not file_exists(repo_root, ROOT_FILES.problem):
+        return None
+    try:
+        return parse_problem_primary_metric(read_text_file(repo_root, ROOT_FILES.problem))
+    except ValueError:
+        return None
 
 
-def print_status_output(status: dict[str, Any]) -> None:
-    primary_metric_payload = status["primaryMetric"]
-    primary_metric = (
-        None
-        if primary_metric_payload is None
-        else PrimaryMetricSpec(
-            direction=primary_metric_payload["direction"],
-            metric=primary_metric_payload["metric"],
-            raw=primary_metric_payload["raw"],
-        )
-    )
-    managed_worktrees = [
-        worktree
-        for worktree in status["worktrees"]
-        if not worktree["isPrimary"] and worktree["isManagedExperiment"]
-    ]
-    unmanaged_worktrees = [
-        worktree
-        for worktree in status["worktrees"]
-        if not worktree["isPrimary"] and not worktree["isManagedExperiment"]
-    ]
-
-    click.echo("checkout:")
-    click.echo(f"  branch: {status['checkout']['branch']}")
-    click.echo(f"  head: {status['checkout']['shortHead']}")
-    click.echo(f"  dirty: {'yes' if status['checkout']['dirty'] else 'no'}")
-    click.echo(f"  state: {status['checkout']['currentRecordState']['kind']}")
-    nearest_ancestor = status["checkout"]["nearestExperimentAncestor"]
-    if nearest_ancestor is not None:
-        click.echo(f"  nearest experiment ancestor: {nearest_ancestor['short_sha']}")
-    if status["checkout"]["currentRecordState"]["problems"]:
-        click.echo("  problems:")
-        for problem in status["checkout"]["currentRecordState"]["problems"]:
-            click.echo(f"    - {problem}")
-    click.echo("")
-
-    click.echo("project:")
-    if status["primaryMetric"]:
-        click.echo(f"  metric: {status['primaryMetric']['raw']}")
-    click.echo(
-        f"  experiments: {status['project']['totalExperiments']} recorded "
-        f"({status['project']['managedWorktreeCounts']['total']} ongoing)"
-    )
-    if status["project"]["bestExperiment"]:
+def print_tip_entries(title: str, entries: list[TipStatusEntry]) -> None:
+    if not entries:
+        return
+    click.echo(title)
+    for entry in entries:
         click.echo(
-            "  best: "
-            f"{format_experiment_summary(status['project']['bestExperiment'], primary_metric)}"
-        )
-    if status["project"]["recentTrend"]:
-        click.echo(
-            "  recent trend: "
-            f"{format_signed_number(status['project']['recentTrend']['delta'])} "
-            f"over last {status['project']['recentTrend']['sampleSize']} recorded experiments "
-            f"({format_duration_ms(status['project']['recentTrend']['spanMs'])} span)"
+            f"  {', '.join(entry.branches)} @ {entry.short_sha}: {'; '.join(entry.problems)}"
         )
     click.echo("")
-
-    click.echo("latest experiments:")
-    if not status["project"]["recentExperiments"]:
-        click.echo("  (none)")
-    else:
-        for record in status["project"]["recentExperiments"]:
-            click.echo(f"  {format_recent_experiment_line(record, primary_metric)}")
-    click.echo("")
-    click.echo("ongoing experiments (managed worktrees):")
-    if not managed_worktrees:
-        click.echo("  (none)")
-    else:
-        for worktree in managed_worktrees:
-            click.echo(f"  {format_managed_worktree_line(worktree)}")
-    click.echo("")
-    if status["activeTipsNeedingAttention"]:
-        click.echo("tip branches needing attention:")
-        for entry in status["activeTipsNeedingAttention"]:
-            click.echo(
-                f"  {', '.join(entry['branches'])} @ {entry['shortSha']}: "
-                f"{'; '.join(entry['problems'])}"
-            )
-        click.echo("")
-    if status["activeTipsMissingRecord"]:
-        click.echo("tip branches missing experiment records:")
-        for entry in status["activeTipsMissingRecord"]:
-            click.echo(
-                f"  {', '.join(entry['branches'])} @ {entry['shortSha']}: "
-                f"{'; '.join(entry['problems'])}"
-            )
-        click.echo("")
-    if unmanaged_worktrees:
-        click.echo("other linked worktrees:")
-        for worktree in unmanaged_worktrees:
-            click.echo(f"  {format_worktree_state(worktree)}")
-        click.echo("")
 
 
 def print_log_record(record: ExperimentRecord) -> None:
@@ -897,7 +783,7 @@ def collect_graph(
     edge_mode: GraphEdges,
     traversal_direction: GraphDirection,
     max_depth: int | None,
-) -> dict[str, Any]:
+) -> LineageGraph:
     record_map = {record.sha: record for record in records}
     git_parent_map = build_git_parent_map(repo_root, records)
     git_child_map = build_git_child_map(git_parent_map)
@@ -908,7 +794,7 @@ def collect_graph(
     node_order: list[str] = []
     seen_depth: dict[str, int] = {}
     edge_keys: set[str] = set()
-    edge_list: list[dict[str, Any]] = []
+    edge_list: list[LineageEdge] = []
 
     while queue:
         current_depth, sha = queue.popleft()
@@ -927,8 +813,8 @@ def collect_graph(
                 return
             queue.append((next_depth, target_sha))
 
-        def add_edge(edge: dict[str, Any]) -> None:
-            edge_key = f"{edge['kind']}:{edge['from']}:{edge['to']}:{edge.get('why', '')}"
+        def add_edge(edge: LineageEdge) -> None:
+            edge_key = f"{edge.kind}:{edge.source}:{edge.target}:{edge.why or ''}"
             if edge_key in edge_keys:
                 return
             edge_keys.add(edge_key)
@@ -936,46 +822,144 @@ def collect_graph(
 
         if include_git_edges and traversal_direction in {"backward", "both"}:
             for parent_sha in git_parent_map.get(sha, []):
-                add_edge({"from": sha, "kind": "git", "to": parent_sha})
+                add_edge(LineageEdge(kind="git", source=sha, target=parent_sha))
                 enqueue(parent_sha, current_depth + 1)
 
         if include_git_edges and traversal_direction in {"forward", "both"}:
             for child_sha in git_child_map.get(sha, []):
-                add_edge({"from": child_sha, "kind": "git", "to": sha})
+                add_edge(LineageEdge(kind="git", source=child_sha, target=sha))
                 enqueue(child_sha, current_depth + 1)
 
         if include_reference_edges and traversal_direction in {"backward", "both"}:
             record = record_map.get(sha)
             for reference in (record.parsed.references or []) if record and record.parsed else []:
                 add_edge(
-                    {
-                        "from": sha,
-                        "kind": "reference",
-                        "to": reference.commit,
-                        "why": reference.why,
-                    }
+                    LineageEdge(
+                        kind="reference",
+                        source=sha,
+                        target=reference.commit,
+                        why=reference.why,
+                    )
                 )
                 enqueue(reference.commit, current_depth + 1)
 
         if include_reference_edges and traversal_direction in {"forward", "both"}:
-            for incoming in incoming_reference_map.get(sha, []):
+            for source, why in incoming_reference_map.get(sha, []):
                 add_edge(
-                    {
-                        "from": incoming["from"],
-                        "kind": "reference",
-                        "to": sha,
-                        "why": incoming["why"],
-                    }
+                    LineageEdge(
+                        kind="reference",
+                        source=source,
+                        target=sha,
+                        why=why,
+                    )
                 )
-                enqueue(incoming["from"], current_depth + 1)
+                enqueue(source, current_depth + 1)
 
-    return {"edges": edge_list, "nodeOrder": node_order}
+    return LineageGraph(node_order=node_order, edges=edge_list)
 
 
 def run_status() -> None:
     repo_root = find_repo_root(os.getcwd())
-    status = build_status_output(repo_root, get_experiment_records(repo_root))
-    print_status_output(status)
+    records = get_experiment_records(repo_root)
+    branches = list_autoevolve_branches(repo_root)
+    tip_map = build_tip_map(branches)
+    record_map = {record.sha: record for record in records}
+    worktrees = list_repo_worktrees(repo_root)
+    primary_metric = read_primary_metric(repo_root)
+
+    active_recorded_tips: list[TipStatusEntry] = []
+    active_tips_missing_record: list[TipStatusEntry] = []
+    active_tips_needing_attention: list[TipStatusEntry] = []
+    for sha, tip_branches in tip_map.items():
+        entry, kind = inspect_active_tip_entry(
+            repo_root, sha, tip_branches, record_map, primary_metric
+        )
+        if kind == "ok":
+            active_recorded_tips.append(entry)
+        elif kind == "missing":
+            active_tips_missing_record.append(entry)
+        else:
+            active_tips_needing_attention.append(entry)
+
+    current_record_state = inspect_current_record_state(repo_root, primary_metric)
+    head_sha = get_head_sha(repo_root)
+    nearest_experiment_ancestor = find_git_experiment_ancestor(
+        repo_root, head_sha, {record.sha for record in records}
+    )
+    nearest_experiment = record_map.get(nearest_experiment_ancestor or "")
+    managed_worktrees = [
+        worktree
+        for worktree in worktrees
+        if not worktree.is_primary and worktree.is_managed_experiment
+    ]
+    unmanaged_worktrees = [
+        worktree
+        for worktree in worktrees
+        if not worktree.is_primary and not worktree.is_managed_experiment
+    ]
+    worktree_counts = summarize_worktree_counts(managed_worktrees)
+    best_experiment = find_project_best_experiment_record(records, primary_metric)
+    recent_trend = build_recent_trend(records, primary_metric)
+    recent_records = find_recent_experiment_records(records, 5)
+
+    click.echo("checkout:")
+    click.echo(f"  branch: {get_current_branch_label(repo_root)}")
+    click.echo(f"  head: {short_sha(head_sha)}")
+    click.echo(f"  dirty: {'yes' if is_checkout_dirty(repo_root) else 'no'}")
+    click.echo(f"  state: {current_record_state.kind}")
+    if nearest_experiment is not None:
+        click.echo(f"  nearest experiment ancestor: {short_sha(nearest_experiment.sha)}")
+    if current_record_state.problems:
+        click.echo("  problems:")
+        for problem in current_record_state.problems:
+            click.echo(f"    - {problem}")
+    click.echo("")
+
+    click.echo("project:")
+    if primary_metric is not None:
+        click.echo(f"  metric: {primary_metric.raw}")
+    click.echo(f"  experiments: {len(records)} recorded ({worktree_counts.total} ongoing)")
+    if best_experiment is not None:
+        click.echo(
+            "  best: "
+            f"{format_experiment_summary(best_experiment.sha, best_experiment.date, best_experiment.parsed.summary if best_experiment.parsed else None, best_experiment.parsed.metrics if best_experiment.parsed else None, primary_metric)}"
+        )
+    if recent_trend is not None:
+        click.echo(
+            "  recent trend: "
+            f"{format_signed_number(recent_trend.delta)} "
+            f"over last {recent_trend.sample_size} recorded experiments "
+            f"({format_duration_ms(recent_trend.span_ms)} span)"
+        )
+    click.echo("")
+
+    click.echo("latest experiments:")
+    if not recent_records:
+        click.echo("  (none)")
+    else:
+        for record in recent_records:
+            click.echo(f"  {format_recent_experiment_line(record, primary_metric)}")
+    click.echo("")
+    click.echo("ongoing experiments (managed worktrees):")
+    if not managed_worktrees:
+        click.echo("  (none)")
+    else:
+        for worktree in managed_worktrees:
+            click.echo(f"  {format_managed_worktree_line(worktree)}")
+    click.echo("")
+    print_tip_entries(
+        "tip branches needing attention:",
+        sort_tip_entries(active_tips_needing_attention, None),
+    )
+    print_tip_entries(
+        "tip branches missing experiment records:",
+        sort_tip_entries(active_tips_missing_record, None),
+    )
+    if unmanaged_worktrees:
+        click.echo("other linked worktrees:")
+        for worktree in unmanaged_worktrees:
+            click.echo(f"  {format_worktree_state(worktree)}")
+        click.echo("")
 
 
 def run_log(limit: int = 10) -> None:
@@ -1017,7 +1001,7 @@ def run_lineage(
     )
     click.echo("")
     click.echo("nodes:")
-    for sha in graph["nodeOrder"]:
+    for sha in graph.node_order:
         record = record_map.get(sha)
         label = (
             f"{short_sha(sha)}  {record.subject}"
@@ -1027,14 +1011,12 @@ def run_lineage(
         click.echo(f"  {label}")
     click.echo("")
     click.echo("edges:")
-    if not graph["edges"]:
+    if not graph.edges:
         click.echo("  (none)")
         return
-    for edge in graph["edges"]:
-        suffix = f" - {edge['why']}" if edge.get("why") else ""
-        click.echo(
-            f"  {edge['kind']}  {short_sha(edge['from'])} -> {short_sha(edge['to'])}{suffix}"
-        )
+    for edge in graph.edges:
+        suffix = f" - {edge.why}" if edge.why else ""
+        click.echo(f"  {edge.kind}  {short_sha(edge.source)} -> {short_sha(edge.target)}{suffix}")
 
 
 def run_compare(left_ref: str, right_ref: str) -> None:
@@ -1064,16 +1046,16 @@ def run_compare(left_ref: str, right_ref: str) -> None:
     click.echo(f"left:  {format_experiment_line(left_record)}")
     click.echo(f"right: {format_experiment_line(right_record)}")
     git_details: list[str] = []
-    if git_relationship["mergeBase"]:
-        git_details.append(f"merge-base {short_sha(git_relationship['mergeBase'].strip())}")
-    if git_relationship["sharedParents"]:
-        suffix = "" if len(git_relationship["sharedParents"]) == 1 else "s"
+    if git_relationship.merge_base:
+        git_details.append(f"merge-base {short_sha(git_relationship.merge_base.strip())}")
+    if git_relationship.shared_parents:
+        suffix = "" if len(git_relationship.shared_parents) == 1 else "s"
         git_details.append(
             f"shared experiment parent{suffix} "
-            f"{', '.join(short_sha(sha) for sha in git_relationship['sharedParents'])}"
+            f"{', '.join(short_sha(sha) for sha in git_relationship.shared_parents)}"
         )
     git_suffix = f" ({'; '.join(git_details)})" if git_details else ""
-    click.echo(f"git:   {git_relationship['relationship']}{git_suffix}")
+    click.echo(f"git:   {git_relationship.relationship}{git_suffix}")
     if diffstat:
         click.echo(f"diff:  {diffstat}")
     click.echo("")
@@ -1082,50 +1064,47 @@ def run_compare(left_ref: str, right_ref: str) -> None:
         click.echo("  (none)")
     else:
         for changed_path in changed_paths:
-            if changed_path["previousPath"]:
+            if changed_path.previous_path:
                 click.echo(
-                    "  "
-                    f"{changed_path['status']}  {changed_path['previousPath']} "
-                    f"-> {changed_path['path']}"
+                    f"  {changed_path.status}  {changed_path.previous_path} -> {changed_path.path}"
                 )
             else:
-                click.echo(f"  {changed_path['status']}  {changed_path['path']}")
+                click.echo(f"  {changed_path.status}  {changed_path.path}")
     click.echo("")
     click.echo("metrics:")
     metric_names = list(metric_diff.keys())
     if not metric_names:
         click.echo("  (none)")
     else:
-        for metric in metric_names:
-            entry = metric_diff[metric]
-            delta_text = f" ({entry['delta']:+g})" if entry["delta"] is not None else ""
+        for metric, entry in metric_diff.items():
+            delta_text = f" ({entry.delta:+g})" if entry.delta is not None else ""
             click.echo(
-                f"  {metric}: {format_metric_value(entry['left'])} "
-                f"-> {format_metric_value(entry['right'])}{delta_text}"
+                f"  {metric}: {format_metric_value(entry.left)} "
+                f"-> {format_metric_value(entry.right)}{delta_text}"
             )
     click.echo("")
     click.echo("references:")
     click.echo(
         "  common: "
         + (
-            ", ".join(short_sha(commit) for commit in reference_diff["common"])
-            if reference_diff["common"]
+            ", ".join(short_sha(commit) for commit in reference_diff.common)
+            if reference_diff.common
             else "(none)"
         )
     )
     click.echo(
         "  left only: "
         + (
-            ", ".join(short_sha(commit) for commit in reference_diff["leftOnly"])
-            if reference_diff["leftOnly"]
+            ", ".join(short_sha(commit) for commit in reference_diff.left_only)
+            if reference_diff.left_only
             else "(none)"
         )
     )
     click.echo(
         "  right only: "
         + (
-            ", ".join(short_sha(commit) for commit in reference_diff["rightOnly"])
-            if reference_diff["rightOnly"]
+            ", ".join(short_sha(commit) for commit in reference_diff.right_only)
+            if reference_diff.right_only
             else "(none)"
         )
     )

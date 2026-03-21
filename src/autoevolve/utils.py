@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from autoevolve.constants import ROOT_FILES
 from autoevolve.errors import AutoevolveError
 from autoevolve.harnesses import HARNESS_SPECS
-from autoevolve.models import ExperimentDocument, ExperimentReference, MetricValue
+from autoevolve.models import ExperimentDocument, ExperimentReference, MetricValue, PromptFile
 
 
 def resolve_repo_path(repo_root: str, relative_path: str) -> str:
@@ -90,7 +90,7 @@ def _parse_references(value: object) -> list[ExperimentReference]:
 
 def parse_experiment_json(json_text: str) -> ExperimentDocument:
     try:
-        value: Any = json.loads(json_text)
+        value = json.loads(json_text)
     except json.JSONDecodeError as error:
         raise AutoevolveError(str(error)) from error
     if not isinstance(value, dict):
@@ -146,11 +146,11 @@ def format_metric_pairs(metrics: dict[str, MetricValue] | None) -> str:
     return ", ".join(f"{name}={json.dumps(value)}" for name, value in metrics.items())
 
 
-def find_prompt_files(repo_root: str) -> list[dict[str, str]]:
-    matches: list[dict[str, str]] = []
+def find_prompt_files(repo_root: str) -> list[PromptFile]:
+    matches: list[PromptFile] = []
     for harness, spec in HARNESS_SPECS.items():
         if file_exists(repo_root, spec.prompt_path):
-            matches.append({"harness": harness.value, "relative_path": spec.prompt_path})
+            matches.append(PromptFile(harness=harness.value, relative_path=spec.prompt_path))
     return matches
 
 

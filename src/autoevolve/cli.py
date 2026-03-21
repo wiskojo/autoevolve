@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import sys
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any
 
 import click
 
@@ -36,6 +35,10 @@ TOP_LEVEL_EXAMPLES = (
     "autoevolve recent --limit 5",
     "autoevolve best --max benchmark_score --limit 5",
 )
+
+GRAPH_EDGE_CHOICES: tuple[GraphEdges, ...] = ("git", "references", "all")
+GRAPH_DIRECTION_CHOICES: tuple[GraphDirection, ...] = ("backward", "forward", "both")
+SET_OUTPUT_FORMAT_CHOICES: tuple[SetOutputFormat, ...] = ("tsv", "jsonl")
 TOP_LEVEL_EPILOG = "\n".join(
     [
         "Examples:",
@@ -68,6 +71,34 @@ class DepthParamType(click.ParamType):
 
 
 DEPTH = DepthParamType()
+
+
+def parse_graph_edges(value: str) -> GraphEdges:
+    if value == "git":
+        return "git"
+    if value == "references":
+        return "references"
+    if value == "all":
+        return "all"
+    raise ValueError(value)
+
+
+def parse_graph_direction(value: str) -> GraphDirection:
+    if value == "backward":
+        return "backward"
+    if value == "forward":
+        return "forward"
+    if value == "both":
+        return "both"
+    raise ValueError(value)
+
+
+def parse_set_output_format(value: str) -> SetOutputFormat:
+    if value == "tsv":
+        return "tsv"
+    if value == "jsonl":
+        return "jsonl"
+    raise ValueError(value)
 
 
 class SectionedCommand(click.Command):
@@ -313,13 +344,13 @@ def compare_command(left_ref: str, right_ref: str) -> None:
 @click.argument("ref")
 @click.option(
     "--edges",
-    type=click.Choice(("git", "references", "all")),
+    type=click.Choice(GRAPH_EDGE_CHOICES),
     default="all",
     show_default=True,
 )
 @click.option(
     "--direction",
-    type=click.Choice(("backward", "forward", "both")),
+    type=click.Choice(GRAPH_DIRECTION_CHOICES),
     default="backward",
     show_default=True,
 )
@@ -332,8 +363,8 @@ def lineage_command(
 ) -> None:
     run_lineage(
         ref=ref,
-        edges=cast(GraphEdges, edges),
-        direction=cast(GraphDirection, direction),
+        edges=parse_graph_edges(edges),
+        direction=parse_graph_direction(direction),
         depth=depth,
     )
 
@@ -353,12 +384,12 @@ def lineage_command(
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(("tsv", "jsonl")),
+    type=click.Choice(SET_OUTPUT_FORMAT_CHOICES),
     default="tsv",
     show_default=True,
 )
 def recent_command(limit: int, output_format: str) -> None:
-    run_recent(limit, cast(SetOutputFormat, output_format))
+    run_recent(limit, parse_set_output_format(output_format))
 
 
 @cli.command(
@@ -378,7 +409,7 @@ def recent_command(limit: int, output_format: str) -> None:
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(("tsv", "jsonl")),
+    type=click.Choice(SET_OUTPUT_FORMAT_CHOICES),
     default="tsv",
     show_default=True,
 )
@@ -395,7 +426,7 @@ def best_command(
         objective = Objective(direction="max", metric=max_metric)
     if min_metric is not None:
         objective = Objective(direction="min", metric=min_metric)
-    run_best(objective, limit, cast(SetOutputFormat, output_format))
+    run_best(objective, limit, parse_set_output_format(output_format))
 
 
 @cli.command(
@@ -415,7 +446,7 @@ def best_command(
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(("tsv", "jsonl")),
+    type=click.Choice(SET_OUTPUT_FORMAT_CHOICES),
     default="tsv",
     show_default=True,
 )
@@ -431,30 +462,12 @@ def pareto_command(
         raise click.UsageError(
             "pareto requires at least one metric, for example: --max primary_metric --min runtime_sec"
         )
-    run_pareto(objectives, limit, cast(SetOutputFormat, output_format))
+    run_pareto(objectives, limit, parse_set_output_format(output_format))
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    try:
-        cli.main(
-            args=list(argv) if argv is not None else None,
-            prog_name="autoevolve",
-            standalone_mode=False,
-        )
-        return 0
-    except SystemExit as error:
-        code = error.code
-        if isinstance(code, int):
-            return code
-        return 0 if code is None else 1
-    except click.ClickException as error:
-        error.show()
-        return error.exit_code
-    except Exception as error:
-        message = error.args[0] if error.args else str(error)
-        click.echo(f"autoevolve: {message}", err=True)
-        return 1
+def main(argv: Sequence[str] | None = None) -> None:
+    cli.main(args=list(argv) if argv is not None else None, prog_name="autoevolve")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from typing import Any
 
 import click
 
@@ -28,6 +27,7 @@ from autoevolve.gittools import (
     run_git_with_git_dir,
     try_git_with_git_dir,
 )
+from autoevolve.models import WorktreeInfo
 from autoevolve.utils import parse_experiment_json, read_text_file, resolve_repo_path, short_sha
 
 JOURNAL_STUB_NOTE = "TODO: fill this in once you're done with your experiment."
@@ -71,18 +71,11 @@ def resolve_managed_worktree_path(experiment_name: str) -> str:
     return worktree_path
 
 
-def describe_worktree_for_removal(worktree: dict[str, Any]) -> str:
-    state = "missing" if worktree["isMissing"] else "dirty" if worktree["dirty"] else "clean"
+def describe_worktree_for_removal(worktree: WorktreeInfo) -> str:
+    state = "missing" if worktree.is_missing else "dirty" if worktree.dirty else "clean"
     return (
-        f"{worktree['path']} ({worktree['branch'] or '(detached HEAD)'}, "
-        f"{state}, {worktree['shortHead']})"
+        f"{worktree.path} ({worktree.branch or '(detached HEAD)'}, {state}, {worktree.short_head})"
     )
-
-
-def resolve_new_experiment_base_ref(repo_root: str, explicit_base_ref: str) -> dict[str, str]:
-    current_branch = run_git(repo_root, ["branch", "--show-current"]).strip()
-    ref = explicit_base_ref or current_branch or "HEAD"
-    return {"ref": ref, "sha": resolve_ref(repo_root, ref)}
 
 
 def delete_managed_experiment_branch_if_present(
@@ -102,19 +95,18 @@ def delete_managed_experiment_branch_if_present(
 
 def run_start(name: str, summary: str, from_ref: str | None = None) -> None:
     repo_root = find_repo_root(os.getcwd())
-    base_ref = resolve_new_experiment_base_ref(repo_root, from_ref or "")
+    current_branch = run_git(repo_root, ["branch", "--show-current"]).strip()
+    base_ref = from_ref or current_branch or "HEAD"
+    base_sha = resolve_ref(repo_root, base_ref)
     branch_name = f"{MANAGED_EXPERIMENT_BRANCH_PREFIX}{name}"
     worktree_path = resolve_managed_worktree_path(name)
     validate_managed_branch_name(repo_root, branch_name)
-    if any(branch["name"] == branch_name for branch in list_autoevolve_branches(repo_root)):
+    if any(branch.name == branch_name for branch in list_autoevolve_branches(repo_root)):
         raise AutoevolveError(f'Branch "{branch_name}" already exists.')
     if os.path.exists(worktree_path):
         raise AutoevolveError(f"Worktree path already exists: {worktree_path}")
     os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
-    run_git(
-        repo_root,
-        ["worktree", "add", "-b", branch_name, worktree_path, base_ref["sha"]],
-    )
+    run_git(repo_root, ["worktree", "add", "-b", branch_name, worktree_path, base_sha])
     with open(
         resolve_repo_path(worktree_path, ROOT_FILES.journal), "w", encoding="utf-8"
     ) as handle:
@@ -124,7 +116,7 @@ def run_start(name: str, summary: str, from_ref: str | None = None) -> None:
     ) as handle:
         handle.write(build_experiment_stub(summary))
     click.echo(f"Branch: {branch_name}")
-    click.echo(f"Base: {base_ref['ref']}")
+    click.echo(f"Base: {base_ref}")
     click.echo(f"Path: {worktree_path}")
 
 
@@ -178,7 +170,7 @@ def run_record() -> None:
 
 def run_clean(name: str | None = None, force: bool = False) -> None:
     repo_root = find_repo_root(os.getcwd())
-    target_worktrees: list[dict[str, Any]] = []
+    target_worktrees: list[WorktreeInfo] = []
     target_experiment_name = ""
     if name:
         target_experiment_name = normalize_managed_experiment_name(name)
@@ -187,14 +179,14 @@ def run_clean(name: str | None = None, force: bool = False) -> None:
             (
                 worktree
                 for worktree in list_repo_worktrees(repo_root)
-                if worktree["path"] == target_path
+                if worktree.path == target_path
             ),
             None,
         )
         if (
             target_worktree is None
-            or target_worktree["isPrimary"]
-            or not is_managed_worktree_path(target_worktree["path"])
+            or target_worktree.is_primary
+            or not is_managed_worktree_path(target_worktree.path)
         ):
             raise AutoevolveError(
                 "No managed experiment worktree named "
@@ -205,13 +197,13 @@ def run_clean(name: str | None = None, force: bool = False) -> None:
         target_worktrees = [
             worktree
             for worktree in list_repo_worktrees(repo_root)
-            if not worktree["isPrimary"] and is_managed_worktree_path(worktree["path"])
+            if not worktree.is_primary and is_managed_worktree_path(worktree.path)
         ]
     if not target_worktrees:
         click.echo("No managed worktrees to clean.")
         return
     blocked_worktrees = [
-        worktree for worktree in target_worktrees if worktree["isMissing"] or worktree["dirty"]
+        worktree for worktree in target_worktrees if worktree.is_missing or worktree.dirty
     ]
     if not force and blocked_worktrees:
         reason = (
@@ -227,12 +219,12 @@ def run_clean(name: str | None = None, force: bool = False) -> None:
             )
         )
     common_git_dir = resolve_git_path(repo_root, "--git-common-dir")
-    target_branches = [worktree["branch"] for worktree in target_worktrees]
+    target_branches = [worktree.branch for worktree in target_worktrees]
     pruned_missing_worktrees = False
     for worktree in target_worktrees:
-        if worktree["isMissing"]:
-            if os.path.exists(worktree["path"]):
-                shutil.rmtree(worktree["path"], ignore_errors=True)
+        if worktree.is_missing:
+            if os.path.exists(worktree.path):
+                shutil.rmtree(worktree.path, ignore_errors=True)
             if not pruned_missing_worktrees:
                 run_git_with_git_dir(
                     os.path.expanduser("~"),
@@ -242,9 +234,9 @@ def run_clean(name: str | None = None, force: bool = False) -> None:
                 pruned_missing_worktrees = True
             continue
         remove_args = ["worktree", "remove"]
-        if force or worktree["dirty"]:
+        if force or worktree.dirty:
             remove_args.append("--force")
-        remove_args.append(worktree["path"])
+        remove_args.append(worktree.path)
         run_git_with_git_dir(os.path.expanduser("~"), common_git_dir, remove_args)
     for branch_name in target_branches:
         delete_managed_experiment_branch_if_present(common_git_dir, branch_name)

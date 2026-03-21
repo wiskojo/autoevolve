@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import cast
 
 from autoevolve.models import MetricDirection, PrimaryMetricSpec
 
@@ -41,8 +40,9 @@ def parse_primary_metric_spec(text: str) -> PrimaryMetricSpec:
         )
 
     direction, metric = match.groups()
+    metric_direction: MetricDirection = "max" if direction == "max" else "min"
     return PrimaryMetricSpec(
-        direction=cast(MetricDirection, direction),
+        direction=metric_direction,
         metric=metric,
         raw=f"{direction} {metric}",
     )
