@@ -145,3 +145,22 @@ def test_init_gemini_continue_hook(repo: RepoFixture) -> None:
             ]
         }
     }
+
+
+def test_init_claude_continue_hook(repo: RepoFixture) -> None:
+    repo.run("init", "--harness", "claude", "--continue-hook", "--yes")
+    settings = json.loads((repo.root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert settings == {
+        "hooks": {
+            "Stop": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": 'printf \'%s\\n\' \'{"decision":"block","reason":"continue"}\'',
+                        }
+                    ]
+                }
+            ]
+        }
+    }

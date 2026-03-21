@@ -87,7 +87,10 @@ HARNESS_SPECS = {
                 build_contents=lambda existing_text: _build_hook_file(
                     existing_text,
                     event_name="Stop",
-                    command=f"printf '%s\\n' {CONTINUE_HOOK_MESSAGE!r} >&2; exit 2",
+                    command=(
+                        "printf '%s\\n' "
+                        f"{json.dumps({'decision': 'block', 'reason': CONTINUE_HOOK_MESSAGE}, separators=(',', ':'))!r}"
+                    ),
                 ),
             ),
         ),
