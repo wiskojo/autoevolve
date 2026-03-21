@@ -15,7 +15,7 @@ from autoevolve.harnesses import (
     parse_harness,
 )
 from autoevolve.problem import parse_problem_primary_metric
-from autoevolve.prompt import ProblemTemplateOptions, build_harness_prompt, build_problem_template
+from autoevolve.prompt import build_harness_prompt, build_problem_template
 from autoevolve.utils import (
     file_exists,
     find_prompt_files,
@@ -143,17 +143,7 @@ def run_init(
     prompt_text = build_harness_prompt(selected_harness)
     existing_problem_path = resolve_repo_path(repo_root, ROOT_FILES.problem)
     keep_existing_problem = os.path.exists(existing_problem_path)
-    problem_template = None
-    if not keep_existing_problem:
-        problem_template = build_problem_template(
-            ProblemTemplateOptions(
-                constraints="",
-                goal="",
-                metric="",
-                metric_description="",
-                validation="",
-            )
-        )
+    problem_template = None if keep_existing_problem else build_problem_template()
 
     prompt_path = harness_spec.prompt_path
     harness_extra_files = (

@@ -26,28 +26,6 @@ def extract_markdown_section(text: str, heading: str) -> str | None:
     return "\n".join(section_lines)
 
 
-def build_problem_metric_section(metric_spec: str, metric_description: str) -> str:
-    trimmed_spec = metric_spec.strip()
-    trimmed_description = metric_description.strip()
-
-    if not trimmed_spec:
-        return "\n".join(
-            [
-                ("TODO: first non-empty line must be `max <metric_name>` or `min <metric_name>`."),
-                "",
-                (
-                    "Optional: provide a natural language description of what "
-                    "we're trying to optimize."
-                ),
-            ]
-        )
-
-    if not trimmed_description:
-        return trimmed_spec
-
-    return f"{trimmed_spec}\n\n{trimmed_description}"
-
-
 def parse_primary_metric_spec(text: str) -> PrimaryMetricSpec:
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
     if not first_line:

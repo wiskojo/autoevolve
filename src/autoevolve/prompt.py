@@ -1,23 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from autoevolve.constants import MANAGED_WORKTREE_ROOT, ROOT_FILES, format_home_relative_path
 from autoevolve.harnesses import Harness, get_harness_spec
-from autoevolve.problem import build_problem_metric_section
-
-
-@dataclass(frozen=True)
-class ProblemTemplateOptions:
-    constraints: str
-    goal: str
-    metric: str
-    metric_description: str
-    validation: str
-
-
-def _with_todo_fallback(value: str, fallback: str) -> str:
-    return value.strip() if value.strip() else fallback
 
 
 def build_protocol_body() -> str:
@@ -350,35 +334,20 @@ def build_harness_prompt(harness: Harness) -> str:
     )
 
 
-def build_problem_template(options: ProblemTemplateOptions) -> str:
-    goal = _with_todo_fallback(
-        options.goal,
-        "TODO: describe the goal you want the agent to solve for.",
-    )
-    metric = build_problem_metric_section(options.metric, options.metric_description)
-    constraints = _with_todo_fallback(
-        options.constraints,
-        "TODO: list any hard constraints or non-goals.",
-    )
-    validation = _with_todo_fallback(
-        options.validation,
-        (
-            "TODO: describe how progress should be validated. This can be a "
-            "command, multiple commands, a script, or a manual evaluation "
-            "procedure."
-        ),
-    )
-    return f"""# Problem
+def build_problem_template() -> str:
+    return """# Problem
 
 ## Goal
-{goal}
+TODO: describe the goal you want the agent to solve for.
 
 ## Metric
-{metric}
+TODO: first non-empty line must be `max <metric_name>` or `min <metric_name>`.
+
+Optional: provide a natural language description of what we're trying to optimize.
 
 ## Constraints
-{constraints}
+TODO: list any hard constraints or non-goals.
 
 ## Validation
-{validation}
+TODO: describe how progress should be validated. This can be a command, multiple commands, a script, or a manual evaluation procedure.
 """
