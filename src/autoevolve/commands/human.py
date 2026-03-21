@@ -1,12 +1,15 @@
 from typing import Annotated
 
 import typer
+from rich.console import Console
+from rich.prompt import Confirm, Prompt
 
 from autoevolve.harnesses import Harness, get_harness_spec
 from autoevolve.repository import PROBLEM_FILE
 from autoevolve.scaffold import Scaffolder
 
 app = typer.Typer()
+console = Console(highlight=False)
 
 
 @app.command(
@@ -30,10 +33,11 @@ def init(
 ) -> None:
     scaffolder = Scaffolder()
     if harness is None:
-        choice = typer.prompt(
-            f"Harness [{'/'.join(item.value for item in Harness)}]",
+        choice = Prompt.ask(
+            "Harness",
+            choices=[item.value for item in Harness],
             default=Harness.CLAUDE.value,
-            show_default=False,
+            console=console,
         )
         selected = Harness(choice.strip())
     else:
@@ -42,8 +46,10 @@ def init(
     if continue_hook and not spec.supports_continue_hook:
         raise RuntimeError(f'Continue hooks are not supported for harness "{selected.value}".')
     if spec.supports_continue_hook and not continue_hook and not yes:
-        continue_hook = bool(
-            typer.confirm(f"Install a continue hook for {selected.value}?", default=False)
+        continue_hook = Confirm.ask(
+            f"Install a continue hook for {selected.value}?",
+            default=False,
+            console=console,
         )
 
     problem_exists = (scaffolder.root / PROBLEM_FILE).exists()
@@ -51,25 +57,31 @@ def init(
     if continue_hook:
         files.extend(item.path for item in spec.continue_hook_files)
 
-    typer.echo(f"repository: {scaffolder.root}")
-    typer.echo(f"harness: {selected.value}")
-    if problem_exists:
-        typer.echo(f"problem: keep existing {PROBLEM_FILE}")
-    typer.echo("files:")
+    console.print("[bold]Setup[/bold]")
+    console.print(f"[bold]{'Repository':<14}[/bold]{scaffolder.root}", soft_wrap=True)
+    console.print(f"[bold]{'Harness':<14}[/bold]{selected.value}")
+    console.print(
+        f"[bold]{'Problem':<14}[/bold]"
+        f"{'keep existing' if problem_exists else 'write'} {PROBLEM_FILE}"
+    )
+    if continue_hook:
+        console.print(f"[bold]{'Continue hook':<14}[/bold]enabled")
+    console.print()
+    console.print("[bold]Files[/bold]")
     for path in files:
         action = "keep" if path == PROBLEM_FILE and problem_exists else "write"
-        typer.echo(f"  - {action} {path}")
-    if not yes and not typer.confirm("Write these files?", default=True):
+        console.print(f"[dim]{action:<6}[/dim]{path}", soft_wrap=True)
+    if not yes and not Confirm.ask("Write these files?", default=True, console=console):
         raise typer.Exit()
 
     written = scaffolder.apply_init(selected, continue_hook)
-    typer.echo("")
-    typer.echo("autoevolve initialized.")
+    console.print()
+    console.print("[bold green]autoevolve initialized[/bold green]")
     if written:
-        typer.echo("written:")
-        for path in written:
-            typer.echo(f"  - {path}")
-    typer.echo(f"next: {spec.handoff_prompt}")
+        console.print(f"[bold]{'Written':<14}[/bold]{written[0]}", soft_wrap=True)
+        for path in written[1:]:
+            console.print(f"{'':14}{path}", soft_wrap=True)
+    console.print(f"[bold]{'Next':<14}[/bold]{spec.handoff_prompt}", soft_wrap=True)
 
 
 @app.command(

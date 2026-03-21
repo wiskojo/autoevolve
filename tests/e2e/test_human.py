@@ -7,17 +7,19 @@ def test_init_other(repo: RepoFixture) -> None:
     result = repo.run("init", "--harness", "other", "--yes")
     assert repo.normalize(result.stdout) == snapshot(
         """\
-repository: <PATH_1>
-harness: other
-files:
-  - write PROBLEM.md
-  - write PROGRAM.md
+Setup
+Repository    <PATH_1>
+Harness       other
+Problem       write PROBLEM.md
 
-autoevolve initialized.
-written:
-  - PROBLEM.md
-  - PROGRAM.md
-next: Read PROGRAM.md and start working.
+Files
+write PROBLEM.md
+write PROGRAM.md
+
+autoevolve initialized
+Written       PROBLEM.md
+              PROGRAM.md
+Next          Read PROGRAM.md and start working.
 """
     )
     assert (repo.root / "PROBLEM.md").exists()
