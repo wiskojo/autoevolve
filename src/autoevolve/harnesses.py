@@ -21,6 +21,7 @@ class ContinueHookFileSpec:
 
 @dataclass(frozen=True)
 class HarnessSpec:
+    display_name: str
     handoff_prompt: str
     prompt_path: str
     uses_skill_frontmatter: bool
@@ -78,6 +79,7 @@ def _build_codex_config(existing_text: str | None) -> str:
 
 HARNESS_SPECS = {
     Harness.CLAUDE: HarnessSpec(
+        display_name="Claude Code",
         handoff_prompt="/autoevolve",
         prompt_path=".claude/skills/autoevolve/SKILL.md",
         uses_skill_frontmatter=True,
@@ -96,6 +98,7 @@ HARNESS_SPECS = {
         ),
     ),
     Harness.CODEX: HarnessSpec(
+        display_name="Codex",
         handoff_prompt="$autoevolve",
         prompt_path=".codex/skills/autoevolve/SKILL.md",
         uses_skill_frontmatter=True,
@@ -118,6 +121,7 @@ HARNESS_SPECS = {
         ),
     ),
     Harness.GEMINI: HarnessSpec(
+        display_name="Gemini",
         handoff_prompt="autoevolve",
         prompt_path=".gemini/skills/autoevolve/SKILL.md",
         uses_skill_frontmatter=True,
@@ -137,7 +141,8 @@ HARNESS_SPECS = {
         ),
     ),
     Harness.OTHER: HarnessSpec(
-        handoff_prompt="Read PROGRAM.md and start working.",
+        display_name="Other",
+        handoff_prompt="Read PROGRAM.md, then start working.",
         prompt_path="PROGRAM.md",
         uses_skill_frontmatter=False,
     ),

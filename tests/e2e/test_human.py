@@ -21,7 +21,10 @@ write PROGRAM.md
 autoevolve initialized
 Written       PROBLEM.md
               PROGRAM.md
-Next          Read PROGRAM.md and start working.
+
+Next Step
+Tell your coding agent to:
+  "Read PROGRAM.md, then start working."
 """
     )
     assert (repo.root / "PROBLEM.md").exists()
@@ -164,3 +167,27 @@ def test_init_claude_continue_hook(repo: RepoFixture) -> None:
             ]
         }
     }
+
+
+def test_init_claude_next_step(repo: RepoFixture) -> None:
+    repo.write_problem()
+    result = repo.run("init", "--harness", "claude", "--yes")
+    assert repo.normalize(result.stdout) == snapshot(
+        """\
+Setup
+Repository    <PATH_1>
+Harness       claude
+Problem       keep existing PROBLEM.md
+
+Files
+keep  PROBLEM.md
+write .claude/skills/autoevolve/SKILL.md
+
+autoevolve initialized
+Written       .claude/skills/autoevolve/SKILL.md
+
+Next Step
+Open Claude Code and type:
+  /autoevolve
+"""
+    )

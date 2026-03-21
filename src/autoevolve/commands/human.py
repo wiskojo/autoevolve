@@ -81,7 +81,18 @@ def init(
         console.print(f"[bold]{'Written':<14}[/bold]{written[0]}", soft_wrap=True)
         for path in written[1:]:
             console.print(f"{'':14}{path}", soft_wrap=True)
-    console.print(f"[bold]{'Next':<14}[/bold]{spec.handoff_prompt}", soft_wrap=True)
+    _print_next_step(selected, spec.display_name, spec.handoff_prompt)
+
+
+def _print_next_step(harness: Harness, display_name: str, handoff_prompt: str) -> None:
+    console.print()
+    console.print("[bold cyan]Next Step[/bold cyan]")
+    if harness is Harness.OTHER:
+        console.print("Tell your coding agent to:")
+        console.print(f'  "{handoff_prompt}"', soft_wrap=True)
+        return
+    console.print(f"Open {display_name} and type:")
+    console.print(f"  [bold]{handoff_prompt}[/bold]", soft_wrap=True)
 
 
 @app.command(
