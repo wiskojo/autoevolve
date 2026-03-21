@@ -5,7 +5,7 @@ description = "Git-backed experiment loops for coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "click>=8.1.8,<9",
+  "typer>=0.15,<1",
   "GitPython>=3.1.43,<4",
 ]
 
@@ -14,12 +14,11 @@ dev = [
     "ruff>=0.8,<1",
     "mypy>=1.14,<2",
     "pytest>=8.3.5,<9",
-    "dirty-equals>=0.11",
     "inline-snapshot>=0.32.5",
 ]
 
 [project.scripts]
-autoevolve = "autoevolve.cli:main"
+autoevolve = "autoevolve.app:main"
 
 [build-system]
 requires = ["hatchling>=1.27"]

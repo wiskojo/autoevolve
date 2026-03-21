@@ -1,304 +1,130 @@
-from __future__ import annotations
+from typing import Annotated
 
-import os
+import typer
 
-import click
+from autoevolve.app import app
+from autoevolve.harnesses import Harness, get_harness_spec
+from autoevolve.repository import PROBLEM_FILE
+from autoevolve.scaffold import Scaffolder
 
-from autoevolve.constants import ROOT_FILES
-from autoevolve.errors import AutoevolveError
-from autoevolve.gittools import find_repo_root
-from autoevolve.harnesses import (
-    DEFAULT_HARNESS,
-    HARNESS_NAMES,
-    Harness,
-    get_harness_spec,
-    parse_harness,
+
+@app.command(
+    "init",
+    rich_help_panel="Human",
+    short_help="Set up PROBLEM.md and agent instructions.",
+    help=(
+        "Set up PROBLEM.md and agent instructions.\n\n"
+        f"If {PROBLEM_FILE} does not exist, init writes a stub. If it already exists, "
+        "init leaves it unchanged. If no harness is provided, init prompts for one. "
+        "Use --yes to skip confirmation prompts and write files immediately."
+    ),
 )
-from autoevolve.problem import parse_problem_primary_metric
-from autoevolve.prompt import build_harness_prompt, build_problem_template
-from autoevolve.utils import (
-    file_exists,
-    find_prompt_files,
-    has_experiment_files,
-    parse_experiment_json,
-    read_text_file,
-    resolve_repo_path,
-    write_text_file,
-)
-
-
-def print_post_init_summary(
-    repo_root: str, written_files: list[str], next_step: str, example_prompt: str
+def init(
+    harness: Annotated[Harness | None, typer.Option(help="Target agent harness.")] = None,
+    continue_hook: Annotated[
+        bool,
+        typer.Option(help="Install a continue-forever stop hook for supported harnesses."),
+    ] = False,
+    yes: Annotated[bool, typer.Option(help="Skip confirmation prompts.")] = False,
 ) -> None:
-    click.echo("")
-    click.echo(f"Repository: {repo_root}")
-    if written_files:
-        click.echo("")
-        click.echo("Files written:")
-        for file_name in written_files:
-            click.echo(f"  - {file_name}")
-    click.echo("")
-    click.echo(f"Next: {next_step}")
-    click.echo("")
-    click.echo("For example:")
-    click.echo(f"  {example_prompt}")
-
-
-def print_post_update_summary(
-    repo_root: str,
-    updated_files: list[str],
-    skipped_files: list[str],
-) -> None:
-    click.echo("")
-    click.echo(f"Repository: {repo_root}")
-    if updated_files:
-        click.echo("")
-        click.echo("Files updated:")
-        for file_name in updated_files:
-            click.echo(f"  - {file_name}")
-    if skipped_files:
-        click.echo("")
-        click.echo("Files skipped:")
-        for file_name in skipped_files:
-            click.echo(f"  - {file_name}")
-
-
-def choose_harness(initial_value: Harness) -> Harness:
-    prompt = "Which coding agent should autoevolve target?"
-    choice = click.prompt(
-        f"{prompt} [{'/'.join(HARNESS_NAMES)}]",
-        type=click.Choice(HARNESS_NAMES),
-        default=initial_value.value,
-        show_choices=False,
-    )
-    return Harness(str(choice))
-
-
-def choose_continue_hook(harness: Harness) -> bool:
-    click.echo("Continue Forever Hook")
-    click.echo(f"Install a {harness.value} stop hook that prevents early termination.")
-    click.echo(
-        "If enabled, the agent should keep running until it believes it is "
-        "done or a human interrupts it."
-    )
-    return bool(click.confirm("Install the continue-forever hook?", default=False))
-
-
-def write_file_with_confirmation(
-    repo_root: str,
-    relative_path: str,
-    contents: str,
-    overwrite_by_default: bool,
-) -> bool:
-    absolute_path = resolve_repo_path(repo_root, relative_path)
-    if os.path.exists(absolute_path) and not overwrite_by_default:
-        if not click.confirm(f"Overwrite {relative_path}?", default=False):
-            return False
-    write_text_file(absolute_path, contents)
-    return True
-
-
-def write_continue_hook_files(
-    repo_root: str, harness: Harness, overwrite_by_default: bool
-) -> list[str]:
-    written: list[str] = []
-    for file_spec in get_harness_spec(harness).continue_hook_files:
-        absolute_path = resolve_repo_path(repo_root, file_spec.path)
-        existing_text = None
-        if os.path.exists(absolute_path):
-            with open(absolute_path, encoding="utf-8") as handle:
-                existing_text = handle.read()
-        wrote = write_file_with_confirmation(
-            repo_root,
-            file_spec.path,
-            file_spec.build_contents(existing_text),
-            overwrite_by_default,
+    scaffolder = Scaffolder()
+    if harness is None:
+        choice = typer.prompt(
+            f"Harness [{'/'.join(item.value for item in Harness)}]",
+            default=Harness.CLAUDE.value,
+            show_default=False,
         )
-        if wrote:
-            written.append(file_spec.path)
-    return written
-
-
-def run_init(
-    harness: Harness | None = None,
-    continue_hook: bool = False,
-    yes: bool = False,
-) -> None:
-    repo_root = find_repo_root(os.getcwd())
-    click.echo(f"Repository\n{repo_root}")
-    if not yes and not click.confirm("Initialize autoevolve in this repository?", default=True):
-        raise SystemExit(0)
-
-    selected_harness = harness or choose_harness(DEFAULT_HARNESS)
-    harness_spec = get_harness_spec(selected_harness)
-    if continue_hook and not harness_spec.supports_continue_hook:
-        raise AutoevolveError(
-            f'Continue hooks are not supported for harness "{selected_harness.value}".'
+        selected = Harness(choice.strip())
+    else:
+        selected = harness
+    spec = get_harness_spec(selected)
+    if continue_hook and not spec.supports_continue_hook:
+        raise RuntimeError(f'Continue hooks are not supported for harness "{selected.value}".')
+    if spec.supports_continue_hook and not continue_hook and not yes:
+        continue_hook = bool(
+            typer.confirm(f"Install a continue hook for {selected.value}?", default=False)
         )
 
-    continue_hook = harness_spec.supports_continue_hook and (
-        continue_hook or (not yes and choose_continue_hook(selected_harness))
-    )
-
-    prompt_text = build_harness_prompt(selected_harness)
-    existing_problem_path = resolve_repo_path(repo_root, ROOT_FILES.problem)
-    keep_existing_problem = os.path.exists(existing_problem_path)
-    problem_template = None if keep_existing_problem else build_problem_template()
-
-    prompt_path = harness_spec.prompt_path
-    harness_extra_files = (
-        [file_spec.path for file_spec in harness_spec.continue_hook_files] if continue_hook else []
-    )
-    planned_write_files = [prompt_path, *harness_extra_files]
-
-    review_lines = [f"Harness: {selected_harness.value}"]
+    problem_exists = (scaffolder.root / PROBLEM_FILE).exists()
+    files = [PROBLEM_FILE, spec.prompt_path]
     if continue_hook:
-        review_lines.append("Continue hook: enabled")
-    if keep_existing_problem:
-        review_lines.append(f"Problem: Keep existing {ROOT_FILES.problem}")
-        review_lines.append(
-            f"Files: keep {ROOT_FILES.problem}, write {', '.join(planned_write_files)}"
-        )
-    else:
-        review_lines.append(f"Files: {', '.join([ROOT_FILES.problem, *planned_write_files])}")
-    click.echo("Review")
-    click.echo("\n".join(review_lines))
+        files.extend(item.path for item in spec.continue_hook_files)
 
-    if not yes and not click.confirm("Write these files?", default=True):
-        raise SystemExit(0)
+    typer.echo(f"repository: {scaffolder.root}")
+    typer.echo(f"harness: {selected.value}")
+    if problem_exists:
+        typer.echo(f"problem: keep existing {PROBLEM_FILE}")
+    typer.echo("files:")
+    for path in files:
+        action = "keep" if path == PROBLEM_FILE and problem_exists else "write"
+        typer.echo(f"  - {action} {path}")
+    if not yes and not typer.confirm("Write these files?", default=True):
+        raise typer.Exit()
 
-    wrote_problem = (
-        False
-        if problem_template is None
-        else write_file_with_confirmation(
-            repo_root,
-            ROOT_FILES.problem,
-            problem_template,
-            yes,
-        )
-    )
-    wrote_prompt = write_file_with_confirmation(
-        repo_root,
-        prompt_path,
-        prompt_text,
-        yes,
-    )
-    wrote_harness_extras = (
-        write_continue_hook_files(repo_root, selected_harness, yes) if continue_hook else []
-    )
-
-    written_files: list[str] = []
-    if wrote_problem:
-        written_files.append(ROOT_FILES.problem)
-    if wrote_prompt:
-        written_files.append(prompt_path)
-    written_files.extend(wrote_harness_extras)
-
-    click.echo("autoevolve initialized.")
-    print_post_init_summary(
-        repo_root,
-        written_files,
-        "ask your agent to finish setup.",
-        harness_spec.handoff_prompt,
-    )
+    written = scaffolder.apply_init(selected, continue_hook)
+    typer.echo("")
+    typer.echo("autoevolve initialized.")
+    if written:
+        typer.echo("written:")
+        for path in written:
+            typer.echo(f"  - {path}")
+    typer.echo(f"next: {spec.handoff_prompt}")
 
 
-def run_update(yes: bool = False) -> None:
-    repo_root = find_repo_root(os.getcwd())
-    prompt_files = find_prompt_files(repo_root)
-    if not prompt_files:
-        raise AutoevolveError("No prompt files found. Run autoevolve init first.")
-
-    click.echo(f"Repository\n{repo_root}")
-    click.echo("Detected prompts")
-    for prompt_file in prompt_files:
-        click.echo(f"- {prompt_file.relative_path} ({prompt_file.harness})")
-
-    updated_files: list[str] = []
-    skipped_files: list[str] = []
-    for prompt_file in prompt_files:
-        relative_path = prompt_file.relative_path
-        harness = parse_harness(prompt_file.harness)
-        wrote = write_file_with_confirmation(
-            repo_root,
-            relative_path,
-            build_harness_prompt(harness),
-            overwrite_by_default=yes or relative_path != ROOT_FILES.program,
-        )
-        if wrote:
-            updated_files.append(relative_path)
-        else:
-            skipped_files.append(relative_path)
-
-    if updated_files:
-        click.echo("autoevolve prompts updated.")
-    else:
-        click.echo("No prompt files updated.")
-    print_post_update_summary(repo_root, updated_files, skipped_files)
-
-
-def run_validate() -> None:
-    repo_root = find_repo_root(os.getcwd())
-    problems: list[str] = []
-    primary_metric = None
-    if not file_exists(repo_root, ROOT_FILES.problem):
-        problems.append(f"Missing {ROOT_FILES.problem}. Run autoevolve init first.")
-    else:
-        try:
-            primary_metric = parse_problem_primary_metric(
-                read_text_file(repo_root, ROOT_FILES.problem)
-            )
-        except ValueError as error:
-            problems.append(str(error))
-
-    if not find_prompt_files(repo_root):
-        problems.append(
-            f"Missing prompt file. Expected {ROOT_FILES.program} or a supported harness skill file."
-        )
-
-    if has_experiment_files(repo_root):
-        has_journal = file_exists(repo_root, ROOT_FILES.journal)
-        has_experiment = file_exists(repo_root, ROOT_FILES.experiment)
-        if not has_journal or not has_experiment:
-            problems.append(
-                "Current checkout must contain both "
-                f"{ROOT_FILES.journal} and {ROOT_FILES.experiment} when "
-                "one is present."
-            )
-        if has_journal:
-            journal_text = read_text_file(repo_root, ROOT_FILES.journal).strip()
-            if not journal_text:
-                problems.append(f"{ROOT_FILES.journal} must not be empty.")
-        if has_experiment:
-            try:
-                parsed_experiment = parse_experiment_json(
-                    read_text_file(repo_root, ROOT_FILES.experiment)
-                )
-                if primary_metric:
-                    experiment_metrics = parsed_experiment.metrics
-                    has_required_metric = (
-                        experiment_metrics is not None
-                        and primary_metric.metric in experiment_metrics
-                    )
-                    if not has_required_metric:
-                        problems.append(
-                            f"{ROOT_FILES.experiment} must record the "
-                            f'primary metric "{primary_metric.metric}" '
-                            f"declared in {ROOT_FILES.problem} "
-                            f"({primary_metric.raw}). You can record "
-                            "additional metrics too, but this one is "
-                            "required."
-                        )
-            except AutoevolveError as error:
-                problems.append(str(error))
+@app.command(
+    "validate",
+    rich_help_panel="Human",
+    short_help="Check that the repo is ready for autoevolve.",
+    help=(
+        "Check that the repo is ready for autoevolve.\n\n"
+        "validate checks the required autoevolve files and validates the current "
+        "experiment record when one is present."
+    ),
+)
+def validate() -> None:
+    problems = Scaffolder().validate()
     if problems:
-        for problem in problems:
-            click.echo(f"FAIL: {problem}")
-        raise SystemExit(1)
-    click.echo("OK: repository is ready for autoevolve.")
-    if not has_experiment_files(repo_root):
-        click.echo(
-            "No current experiment record found. Add "
-            f"{ROOT_FILES.journal} and {ROOT_FILES.experiment} in the "
-            "first experiment commit."
-        )
+        raise RuntimeError("\n".join(problems))
+    typer.echo("OK: repository is ready for autoevolve.")
+
+
+@app.command(
+    "update",
+    rich_help_panel="Human",
+    short_help="Update detected prompt files to the latest version.",
+    help=(
+        "Update detected prompt files to the latest version.\n\n"
+        "update refreshes any detected harness prompt files in the current "
+        "repository. It asks before overwriting PROGRAM.md unless --yes is set."
+    ),
+)
+def update(
+    yes: Annotated[bool, typer.Option(help="Skip confirmation prompts.")] = False,
+) -> None:
+    scaffolder = Scaffolder()
+    prompt_files = scaffolder.prompt_files()
+    if not prompt_files:
+        raise RuntimeError("No prompt files found. Run autoevolve init first.")
+
+    updated: list[str] = []
+    skipped: list[str] = []
+    typer.echo("detected prompts:")
+    for prompt_file in prompt_files:
+        relative = prompt_file.path.relative_to(scaffolder.root).as_posix()
+        typer.echo(f"  - {relative} ({prompt_file.harness})")
+        if relative == "PROGRAM.md" and not yes:
+            if not typer.confirm("Overwrite PROGRAM.md?", default=False):
+                skipped.append(relative)
+                continue
+        scaffolder.update_prompt(prompt_file)
+        updated.append(relative)
+
+    typer.echo("")
+    if updated:
+        typer.echo("updated:")
+        for path in updated:
+            typer.echo(f"  - {path}")
+    if skipped:
+        typer.echo("skipped:")
+        for path in skipped:
+            typer.echo(f"  - {path}")

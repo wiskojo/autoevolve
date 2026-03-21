@@ -1,269 +1,162 @@
-from __future__ import annotations
-
 import json
-import os
+from typing import Annotated
 
-import click
+import typer
 
-from autoevolve.commands.shared import (
-    apply_limit,
-    build_experiment_object_for_output,
-    get_experiment_records,
-    get_record_numeric_metric_value,
+from autoevolve.app import app
+from autoevolve.models.experiment import ExperimentRecord, Objective
+from autoevolve.models.types import SetOutputFormat
+from autoevolve.repository import ExperimentRepository
+
+
+@app.command(
+    "recent",
+    rich_help_panel="Analytics",
+    short_help="List the most recent recorded experiments.",
+    help=(
+        "List the most recent recorded experiments.\n\n"
+        "recent emits recent experiments in TSV or JSONL format for scripting "
+        "and analysis."
+    ),
 )
-from autoevolve.constants import ROOT_FILES
-from autoevolve.errors import AutoevolveError
-from autoevolve.gittools import find_repo_root
-from autoevolve.models import (
-    ExperimentRecord,
-    MetricDirection,
-    Objective,
-    SetOutputFormat,
-)
-from autoevolve.problem import parse_problem_primary_metric
-from autoevolve.utils import (
-    file_exists,
-    format_metric_pairs,
-    is_number,
-    read_text_file,
-    short_sha,
-    sort_iso_datetime_value,
-)
-
-
-def collect_metric_names(records: list[ExperimentRecord]) -> set[str]:
-    metric_names: set[str] = set()
-    for record in records:
-        if record.parsed and record.parsed.metrics:
-            metric_names.update(record.parsed.metrics.keys())
-    return metric_names
-
-
-def format_known_metrics(metric_names: set[str]) -> str:
-    return ", ".join(sorted(metric_names)) if metric_names else "none yet"
-
-
-def normalize_metric_field_name(field: str) -> str:
-    if field.startswith("metrics."):
-        metric_name = field[len("metrics.") :]
-        if not metric_name:
-            raise AutoevolveError("Metric fields must use metrics.<name>.")
-        return metric_name
-    return field
-
-
-def validate_metric_name(metric: str, metric_names: set[str], flag_name: str) -> str:
-    normalized = normalize_metric_field_name(metric)
-    if metric_names and normalized not in metric_names:
-        raise AutoevolveError(
-            f'{flag_name} unknown metric "{normalized}". Known metrics: '
-            f"{format_known_metrics(metric_names)}"
-        )
-    return normalized
-
-
-def resolve_best_objective(
-    repo_root: str,
-    metric_names: set[str],
-    direction: MetricDirection | None,
-    metric: str | None,
-) -> Objective:
-    if direction is not None:
-        return Objective(
-            direction=direction,
-            metric=validate_metric_name(metric or "", metric_names, f"--{direction}"),
-        )
-
-    if not file_exists(repo_root, ROOT_FILES.problem):
-        raise AutoevolveError(
-            "best requires an explicit objective, or a valid PROBLEM.md primary metric."
-        )
-
-    try:
-        primary_metric = parse_problem_primary_metric(read_text_file(repo_root, ROOT_FILES.problem))
-    except ValueError as error:
-        raise AutoevolveError(
-            "best requires an explicit objective, or a valid PROBLEM.md primary metric."
-        ) from error
-
-    return Objective(
-        direction=primary_metric.direction,
-        metric=validate_metric_name(
-            primary_metric.metric,
-            metric_names,
-            f"--{primary_metric.direction}",
-        ),
-    )
-
-
-def validate_pareto_objectives(
-    objectives: list[Objective], metric_names: set[str]
-) -> list[Objective]:
-    return [
-        Objective(
-            direction=objective.direction,
-            metric=validate_metric_name(
-                objective.metric,
-                metric_names,
-                f"--{objective.direction}",
-            ),
-        )
-        for objective in objectives
-    ]
-
-
-def dominates(
-    candidate: ExperimentRecord,
-    challenger: ExperimentRecord,
-    objectives: list[Objective],
-) -> bool:
-    strictly_better = False
-    for objective in objectives:
-        candidate_value = get_record_numeric_metric_value(candidate, objective.metric)
-        challenger_value = get_record_numeric_metric_value(challenger, objective.metric)
-        if not is_number(candidate_value) or not is_number(challenger_value):
-            return False
-        if objective.direction == "max":
-            if candidate_value < challenger_value:
-                return False
-            if candidate_value > challenger_value:
-                strictly_better = True
-        else:
-            if candidate_value > challenger_value:
-                return False
-            if candidate_value < challenger_value:
-                strictly_better = True
-    return strictly_better
-
-
-def format_experiment_tsv_row(record: ExperimentRecord) -> str:
-    def clean(value: str) -> str:
-        return value.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
-
-    fields = [
-        short_sha(record.sha),
-        record.date,
-        clean(record.subject),
-        clean(",".join(record.tip_branches)),
-        clean(format_metric_pairs(record.parsed.metrics if record.parsed else None) or ""),
-        clean(record.parsed.summary if record.parsed else record.parse_error or ""),
-    ]
-    return "\t".join(fields)
-
-
-def print_set_header(output_format: SetOutputFormat) -> None:
-    if output_format == "tsv":
-        click.echo("sha\tdate\tsubject\ttips\tmetrics\tsummary")
-
-
-def print_set_record(record: ExperimentRecord, output_format: SetOutputFormat) -> None:
-    if output_format == "jsonl":
-        click.echo(json.dumps(build_experiment_object_for_output(record)))
-        return
-    click.echo(format_experiment_tsv_row(record))
-
-
-def run_recent(limit: int = 10, output_format: SetOutputFormat = "tsv") -> None:
-    repo_root = find_repo_root(os.getcwd())
-    records = apply_limit(
-        sorted(
-            get_experiment_records(repo_root),
-            key=lambda record: record.date,
-            reverse=True,
-        ),
-        limit,
-    )
-    if not records:
-        if output_format != "jsonl":
-            click.echo("No experiments found.")
-        return
-    print_set_header(output_format)
-    for record in records:
-        print_set_record(record, output_format)
-
-
-def run_best(
-    objective: Objective | None = None,
-    limit: int = 5,
-    output_format: SetOutputFormat = "tsv",
+def recent(
+    limit: Annotated[int, typer.Option(min=1, help="Number of experiments to show.")] = 10,
+    output_format: Annotated[
+        SetOutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = SetOutputFormat.TSV,
 ) -> None:
-    repo_root = find_repo_root(os.getcwd())
-    all_records = get_experiment_records(repo_root)
-    resolved_objective = resolve_best_objective(
-        repo_root,
-        collect_metric_names(all_records),
-        objective.direction if objective is not None else None,
-        objective.metric if objective is not None else None,
-    )
-    records = [
-        record
-        for record in all_records
-        if record.parsed
-        and record.parsed.metrics
-        and get_record_numeric_metric_value(record, resolved_objective.metric) is not None
-    ]
-
-    def best_key(record: ExperimentRecord) -> tuple[int | float, int]:
-        metric_value = get_record_numeric_metric_value(record, resolved_objective.metric)
-        if metric_value is None:
-            raise AutoevolveError(
-                f'Metric "{resolved_objective.metric}" must be numeric for ranking.'
-            )
-        ranked_value = metric_value if resolved_objective.direction == "min" else -metric_value
-        return (ranked_value, -sort_iso_datetime_value(record.date))
-
-    records = sorted(records, key=best_key)[:limit]
-    if not records:
-        if output_format != "jsonl":
-            click.echo(f'No experiments found with a numeric "{resolved_objective.metric}" metric.')
-        return
-    print_set_header(output_format)
-    for record in records:
-        print_set_record(record, output_format)
+    _print_records(ExperimentRepository().recent_records(limit), output_format)
 
 
-def run_pareto(
-    objectives: list[Objective],
-    limit: int | None = None,
-    output_format: SetOutputFormat = "tsv",
+@app.command(
+    "best",
+    rich_help_panel="Analytics",
+    short_help="List the top experiments for one metric.",
+    help=(
+        "List the top experiments for one metric.\n\n"
+        "best ranks recorded experiments by one metric. If no metric is "
+        "provided, it defaults to the primary metric from PROBLEM.md."
+    ),
+)
+def best(
+    max_metric: Annotated[str | None, typer.Option("--max", help="Metric to maximize.")] = None,
+    min_metric: Annotated[str | None, typer.Option("--min", help="Metric to minimize.")] = None,
+    limit: Annotated[int, typer.Option(min=1, help="Number of experiments to show.")] = 5,
+    output_format: Annotated[
+        SetOutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = SetOutputFormat.TSV,
 ) -> None:
-    repo_root = find_repo_root(os.getcwd())
-    all_records = get_experiment_records(repo_root)
-    objectives = validate_pareto_objectives(objectives, collect_metric_names(all_records))
-    candidates = [
-        record
-        for record in all_records
-        if all(
-            get_record_numeric_metric_value(record, objective.metric) is not None
-            for objective in objectives
-        )
-    ]
-    if not candidates:
-        if output_format != "jsonl":
-            click.echo(
-                "No experiments found with numeric metrics for the requested Pareto objectives."
-            )
+    if max_metric and min_metric:
+        raise typer.BadParameter("Use either --max <metric> or --min <metric>, not both.")
+
+    objective = None
+    if max_metric is not None:
+        objective = Objective(direction="max", metric=max_metric)
+    if min_metric is not None:
+        objective = Objective(direction="min", metric=min_metric)
+
+    repository = ExperimentRepository()
+    if objective is None:
+        try:
+            problem = repository.problem()
+        except (FileNotFoundError, ValueError) as error:
+            raise RuntimeError(
+                "best requires an explicit objective, or a valid PROBLEM.md primary metric."
+            ) from error
+        resolved = Objective(direction=problem.direction, metric=problem.metric)
+    else:
+        resolved = objective
+    records = repository.best_records(resolved, limit)
+    if not records:
+        typer.echo(f'No experiments found with a numeric "{resolved.metric}" metric.')
         return
-    frontier = [
-        candidate
-        for candidate in candidates
-        if not any(
-            other.sha != candidate.sha and dominates(other, candidate, objectives)
-            for other in candidates
+    _print_records(records, output_format)
+
+
+@app.command(
+    "pareto",
+    rich_help_panel="Analytics",
+    short_help="List the Pareto frontier for selected metrics.",
+    help=(
+        "List the Pareto frontier for selected metrics.\n\n"
+        "pareto returns the non-dominated recorded experiments for the selected "
+        "metrics in TSV or JSONL format."
+    ),
+)
+def pareto(
+    max_metrics: Annotated[
+        list[str] | None,
+        typer.Option("--max", help="Metric to maximize. Repeat as needed."),
+    ] = None,
+    min_metrics: Annotated[
+        list[str] | None,
+        typer.Option("--min", help="Metric to minimize. Repeat as needed."),
+    ] = None,
+    limit: Annotated[int | None, typer.Option(min=1, help="Number of experiments to show.")] = None,
+    output_format: Annotated[
+        SetOutputFormat,
+        typer.Option("--format", help="Output format."),
+    ] = SetOutputFormat.TSV,
+) -> None:
+    objectives = [Objective(direction="max", metric=metric) for metric in max_metrics or ()]
+    objectives.extend(Objective(direction="min", metric=metric) for metric in min_metrics or ())
+    if not objectives:
+        raise typer.BadParameter(
+            "pareto requires at least one metric, for example: --max primary_metric --min runtime_sec"
         )
-    ]
 
-    def pareto_key(record: ExperimentRecord) -> tuple[int | float, ...]:
-        values: list[int | float] = []
-        for objective in objectives:
-            metric_value = get_record_numeric_metric_value(record, objective.metric)
-            if metric_value is None:
-                raise AutoevolveError(f'Metric "{objective.metric}" must be numeric for ranking.')
-            values.append(metric_value if objective.direction == "min" else -metric_value)
-        values.append(-sort_iso_datetime_value(record.date))
-        return tuple(values)
+    records = ExperimentRepository().pareto_records(objectives, limit)
+    if not records:
+        typer.echo("No experiments found with numeric metrics for the requested Pareto objectives.")
+        return
+    _print_records(records, output_format)
 
-    records = apply_limit(sorted(frontier, key=pareto_key), limit)
-    print_set_header(output_format)
+
+def _print_records(records: list[ExperimentRecord], output_format: SetOutputFormat) -> None:
+    if not records:
+        typer.echo("No experiments found.")
+        return
+    if output_format is SetOutputFormat.TSV:
+        typer.echo("sha\tdate\tmetrics\tsummary")
+        for record in records:
+            typer.echo(_tsv_row(record))
+        return
     for record in records:
-        print_set_record(record, output_format)
+        typer.echo(json.dumps(_json_record(record)))
+
+
+def _tsv_row(record: ExperimentRecord) -> str:
+    return "\t".join(
+        [
+            record.sha[:7],
+            record.date,
+            _clean(_metric_pairs(record)),
+            _clean(record.document.summary),
+        ]
+    )
+
+
+def _json_record(record: ExperimentRecord) -> dict[str, object]:
+    return {
+        "sha": record.sha,
+        "short_sha": record.sha[:7],
+        "date": record.date,
+        "summary": record.document.summary,
+        "metrics": record.document.metrics,
+        "references": [
+            {"commit": reference.commit, "why": reference.why}
+            for reference in record.document.references
+        ],
+    }
+
+
+def _metric_pairs(record: ExperimentRecord) -> str:
+    return ", ".join(
+        f"{name}={json.dumps(value)}" for name, value in record.document.metrics.items()
+    )
+
+
+def _clean(value: str) -> str:
+    return value.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()

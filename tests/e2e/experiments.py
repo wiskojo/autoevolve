@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 VALIDATION_COMMAND = "python3 scripts/validate.py"
@@ -7,7 +5,7 @@ VALIDATION_COMMAND = "python3 scripts/validate.py"
 
 @dataclass(frozen=True)
 class FixtureReference:
-    branch: str
+    name: str
     why: str
 
 
@@ -20,7 +18,7 @@ class ExperimentWeights:
 
 @dataclass(frozen=True)
 class FixtureExperiment:
-    branch: str
+    name: str
     date: str
     hypothesis: str
     score: float
@@ -34,7 +32,7 @@ class FixtureExperiment:
 
 EXPERIMENTS = [
     FixtureExperiment(
-        branch="island-a/baseline",
+        name="island-a/baseline",
         base=None,
         references=(),
         date="2026-01-01T12:00:00Z",
@@ -46,7 +44,7 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.1, freshness=0.45, relevance=0.45),
     ),
     FixtureExperiment(
-        branch="island-b/boost-freshness",
+        name="island-b/boost-freshness",
         base="island-a/baseline",
         references=(),
         date="2026-01-01T12:01:00Z",
@@ -62,7 +60,7 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.09, freshness=0.49, relevance=0.42),
     ),
     FixtureExperiment(
-        branch="island-c/clip-premium",
+        name="island-c/clip-premium",
         base="island-a/baseline",
         references=(),
         date="2026-01-01T12:02:00Z",
@@ -79,7 +77,7 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.1, freshness=0.41, relevance=0.49),
     ),
     FixtureExperiment(
-        branch="island-a/rebalance-weights",
+        name="island-a/rebalance-weights",
         base="island-a/baseline",
         references=(),
         date="2026-01-01T12:03:00Z",
@@ -91,11 +89,11 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.15, freshness=0.4, relevance=0.45),
     ),
     FixtureExperiment(
-        branch="island-b/stale-recovery",
+        name="island-b/stale-recovery",
         base="island-b/boost-freshness",
         references=(
             FixtureReference(
-                branch="island-a/rebalance-weights",
+                name="island-a/rebalance-weights",
                 why="borrowed the cheaper-case weighting intuition from this experiment",
             ),
         ),
@@ -110,13 +108,13 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.17, freshness=0.38, relevance=0.45),
     ),
     FixtureExperiment(
-        branch="island-c/relevance-lean",
+        name="island-c/relevance-lean",
         base="island-c/clip-premium",
         references=(
             FixtureReference(
-                branch="island-b/boost-freshness",
+                name="island-b/boost-freshness",
                 why=(
-                    "kept the freshness behavior from this branch in mind "
+                    "kept the freshness behavior from that earlier experiment in mind "
                     "while leaning harder on relevance"
                 ),
             ),
@@ -127,23 +125,23 @@ EXPERIMENTS = [
         ),
         score=0.861,
         runtime_sec=0.8,
-        summary="A relevance-heavy mix helped somewhat and became the fastest branch to validate.",
+        summary="A relevance-heavy mix helped somewhat and became the fastest variant to validate.",
         title="Island C Relevance Lean",
         weights=ExperimentWeights(affordability=0.08, freshness=0.35, relevance=0.57),
     ),
     FixtureExperiment(
-        branch="island-a/cheap-priority",
+        name="island-a/cheap-priority",
         base="island-a/rebalance-weights",
         references=(
             FixtureReference(
-                branch="island-b/stale-recovery",
-                why="checked the affordability shift against this stale-recovery branch",
+                name="island-b/stale-recovery",
+                why="checked the affordability shift against the stale-recovery experiment",
             ),
         ),
         date="2026-01-01T12:06:00Z",
         hypothesis=(
             "Push affordability further on island A while checking it against "
-            "the stale-recovery branch."
+            "the stale-recovery experiment."
         ),
         score=0.887,
         runtime_sec=1.04,
@@ -155,11 +153,11 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.19, freshness=0.36, relevance=0.45),
     ),
     FixtureExperiment(
-        branch="island-c/premium-guard",
+        name="island-c/premium-guard",
         base="island-c/relevance-lean",
         references=(
             FixtureReference(
-                branch="island-a/rebalance-weights",
+                name="island-a/rebalance-weights",
                 why="used the cheaper-case signal from this run as a guardrail",
             ),
         ),
@@ -175,11 +173,11 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.18, freshness=0.39, relevance=0.43),
     ),
     FixtureExperiment(
-        branch="island-a/cost-penalty",
+        name="island-a/cost-penalty",
         base="island-a/cheap-priority",
         references=(
             FixtureReference(
-                branch="island-b/stale-recovery",
+                name="island-b/stale-recovery",
                 why="borrowed the stale-case recovery intuition from this experiment",
             ),
         ),
@@ -194,12 +192,12 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.22, freshness=0.33, relevance=0.45),
     ),
     FixtureExperiment(
-        branch="island-c/overfit-premium",
+        name="island-c/overfit-premium",
         base="island-c/premium-guard",
         references=(
             FixtureReference(
-                branch="island-b/boost-freshness",
-                why="leaned too hard on the premium-friendly freshness idea from this branch",
+                name="island-b/boost-freshness",
+                why="leaned too hard on the premium-friendly freshness idea from that experiment",
             ),
         ),
         date="2026-01-01T12:09:00Z",
@@ -216,11 +214,11 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.05, freshness=0.55, relevance=0.4),
     ),
     FixtureExperiment(
-        branch="island-a/balanced-v2",
+        name="island-a/balanced-v2",
         base="island-a/cost-penalty",
         references=(
             FixtureReference(
-                branch="island-c/premium-guard",
+                name="island-c/premium-guard",
                 why="borrowed the premium-guard idea from this experiment",
             ),
         ),
@@ -238,15 +236,15 @@ EXPERIMENTS = [
         weights=ExperimentWeights(affordability=0.2, freshness=0.36, relevance=0.44),
     ),
     FixtureExperiment(
-        branch="cross/hybrid-final",
+        name="cross/hybrid-final",
         base="island-a/balanced-v2",
         references=(
             FixtureReference(
-                branch="island-b/stale-recovery",
+                name="island-b/stale-recovery",
                 why=("borrowed the stale-case recovery heuristic idea from this experiment"),
             ),
             FixtureReference(
-                branch="island-c/premium-guard",
+                name="island-c/premium-guard",
                 why="borrowed the premium-guard weighting idea from this experiment",
             ),
         ),
@@ -267,20 +265,14 @@ EXPERIMENTS = [
 ]
 
 
-def with_prefix(branch: str | None) -> str | None:
-    return branch
-
-
 def resolve_references(
-    experiment: FixtureExperiment, commit_by_branch: dict[str, str]
+    experiment: FixtureExperiment, commit_by_name: dict[str, str]
 ) -> list[dict[str, str]]:
     resolved: list[dict[str, str]] = []
     for reference in experiment.references:
-        reference_commit = commit_by_branch.get(reference.branch)
+        reference_commit = commit_by_name.get(reference.name)
         if reference_commit is None:
-            raise AssertionError(
-                f'Unknown reference "{reference.branch}" for "{experiment.branch}"'
-            )
+            raise AssertionError(f'Unknown reference "{reference.name}" for "{experiment.name}"')
         resolved.append({"commit": reference_commit, "why": reference.why})
     return resolved
 
@@ -291,10 +283,10 @@ def build_journal_text(
     resolved_references: list[dict[str, str]],
 ) -> str:
     if experiment.base and not base_commit:
-        raise AssertionError(f"Missing base commit for {experiment.branch}")
+        raise AssertionError(f"Missing base commit for {experiment.name}")
     base_line = "- git parent: main"
     if experiment.base and base_commit:
-        base_line = f"- git parent: {with_prefix(experiment.base)} @ {base_commit[:7]}"
+        base_line = f"- git parent: {experiment.base} @ {base_commit[:7]}"
     reference_lines = (
         "- none"
         if not resolved_references

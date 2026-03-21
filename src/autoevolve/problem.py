@@ -1,58 +1,44 @@
-from __future__ import annotations
-
 import re
 
-from autoevolve.models import MetricDirection, PrimaryMetricSpec
+from autoevolve.models.experiment import ProblemSpec
+from autoevolve.models.types import MetricDirection
 
-PRIMARY_METRIC_SPEC_PATTERN = re.compile(r"^(max|min)\s+([A-Za-z_][A-Za-z0-9_.-]*)$")
+PRIMARY_METRIC_PATTERN = re.compile(r"^(max|min)\s+([A-Za-z_][A-Za-z0-9_.-]*)$")
 
 
-def extract_markdown_section(text: str, heading: str) -> str | None:
-    lines = text.splitlines()
+def markdown_section(text: str, heading: str) -> str | None:
     section_header = f"## {heading}"
-    try:
-        start_index = next(
-            index for index, line in enumerate(lines) if line.strip() == section_header
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != section_header:
+            continue
+        body: list[str] = []
+        for candidate in lines[index + 1 :]:
+            if candidate.strip().startswith("## "):
+                break
+            body.append(candidate)
+        return "\n".join(body).strip()
+    return None
+
+
+def parse_problem_spec(text: str) -> ProblemSpec:
+    metric_section = markdown_section(text, "Metric")
+    if metric_section is None:
+        raise ValueError(
+            'PROBLEM.md must contain a "## Metric" section whose first non-empty line is '
+            '"max <metric>" or "min <metric>".'
         )
-    except StopIteration:
-        return None
-
-    section_lines: list[str] = []
-    for line in lines[start_index + 1 :]:
-        if re.match(r"^##\s+", line.strip()):
-            break
-        section_lines.append(line)
-    return "\n".join(section_lines)
-
-
-def parse_primary_metric_spec(text: str) -> PrimaryMetricSpec:
-    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    first_line = next((line.strip() for line in metric_section.splitlines() if line.strip()), "")
     if not first_line:
         raise ValueError(
             'PROBLEM.md section "Metric" must start with "max <metric>" or "min <metric>".'
         )
-
-    match = PRIMARY_METRIC_SPEC_PATTERN.fullmatch(first_line)
-    if not match:
+    match = PRIMARY_METRIC_PATTERN.fullmatch(first_line)
+    if match is None:
         raise ValueError(
-            'PROBLEM.md section "Metric" must start with "max <metric>" '
-            'or "min <metric>" (for example: "max benchmark_score").'
+            'PROBLEM.md section "Metric" must start with "max <metric>" or "min <metric>" '
+            '(for example: "max benchmark_score").'
         )
-
-    direction, metric = match.groups()
-    metric_direction: MetricDirection = "max" if direction == "max" else "min"
-    return PrimaryMetricSpec(
-        direction=metric_direction,
-        metric=metric,
-        raw=f"{direction} {metric}",
-    )
-
-
-def parse_problem_primary_metric(problem_text: str) -> PrimaryMetricSpec:
-    metric_section = extract_markdown_section(problem_text, "Metric")
-    if metric_section is None:
-        raise ValueError(
-            'PROBLEM.md must contain a "## Metric" section whose first '
-            'non-empty line is "max <metric>" or "min <metric>".'
-        )
-    return parse_primary_metric_spec(metric_section)
+    direction_text, metric = match.groups()
+    direction: MetricDirection = "max" if direction_text == "max" else "min"
+    return ProblemSpec(direction=direction, metric=metric, raw=f"{direction} {metric}")

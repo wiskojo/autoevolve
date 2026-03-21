@@ -1,12 +1,7 @@
-from __future__ import annotations
-
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
-
-from autoevolve.constants import ROOT_FILES
-from autoevolve.errors import AutoevolveError
 
 CONTINUE_HOOK_MESSAGE = "continue"
 SHELL_CONTINUE_HOOK_COMMAND = f"printf '%s\\n' {CONTINUE_HOOK_MESSAGE!r} >&2; exit 2"
@@ -21,10 +16,6 @@ class Harness(str, Enum):
     CODEX = "codex"
     GEMINI = "gemini"
     OTHER = "other"
-
-
-DEFAULT_HARNESS = Harness.CLAUDE
-HARNESS_NAMES = tuple(harness.value for harness in Harness)
 
 
 @dataclass(frozen=True)
@@ -45,19 +36,12 @@ class HarnessSpec:
         return bool(self.continue_hook_files)
 
 
-def parse_harness(value: str) -> Harness:
-    try:
-        return Harness(value)
-    except ValueError as error:
-        raise AutoevolveError(f'Unsupported harness "{value}".') from error
-
-
 def _parse_json_object_file(existing_text: str | None) -> dict[str, object]:
     if existing_text is None:
         return {}
     parsed = json.loads(existing_text)
     if not isinstance(parsed, dict):
-        raise AutoevolveError("settings file must contain a JSON object.")
+        raise ValueError("settings file must contain a JSON object.")
     return dict(parsed)
 
 
@@ -154,8 +138,8 @@ HARNESS_SPECS = {
         ),
     ),
     Harness.OTHER: HarnessSpec(
-        handoff_prompt=f"Read {ROOT_FILES.program} and start working.",
-        prompt_path=ROOT_FILES.program,
+        handoff_prompt="Read PROGRAM.md and start working.",
+        prompt_path="PROGRAM.md",
         uses_skill_frontmatter=False,
     ),
 }
