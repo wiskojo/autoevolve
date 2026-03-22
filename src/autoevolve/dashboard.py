@@ -813,9 +813,9 @@ class ExperimentsPane(DataTable[object]):
             return
         width = max(self.content_region.width, 32)
         recorded_rows = [entry for entry in self._rows if isinstance(entry, DashboardEntry)]
-        ref_width = max([14, *(len(entry.ref) + 1 for entry in recorded_rows)])
+        ref_width = max([7, len("--"), *(len(entry.ref) for entry in recorded_rows)]) + 1
         score_width = max(
-            12,
+            len("SCORE") + 1,
             *(len(_format_score(entry.score)) + 1 for entry in recorded_rows),
             len(_ongoing_score_placeholder()) + 1,
         )
