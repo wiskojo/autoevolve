@@ -738,11 +738,24 @@ class ExperimentsPane(DataTable[object]):
 
     def set_snapshot(self, snapshot: DashboardSnapshot, selected_key: str) -> None:
         self._snapshot = snapshot
-        self._rows = [
-            *sorted(snapshot.ongoing, key=lambda entry: entry.ref.lower()),
-            *sorted(snapshot.entries, key=lambda entry: entry.number, reverse=True),
-        ]
+        self._rows = _ordered_dashboard_rows(snapshot)
         self._refresh_view(selected_key)
+
+    def refresh_relative_fields(self, snapshot: DashboardSnapshot, selected_key: str) -> None:
+        rows = _ordered_dashboard_rows(snapshot)
+        if [entry.key for entry in rows] != [entry.key for entry in self._rows]:
+            self.set_snapshot(snapshot, selected_key)
+            return
+        self._snapshot = snapshot
+        self._rows = rows
+        for row_index, entry in enumerate(self._rows):
+            self.update_cell_at(
+                Coordinate(row_index, 5),
+                Text(_table_age(entry), style="#d1d5db" if _is_recorded(entry) else "#8b95a7"),
+                update_width=True,
+            )
+        if self._rows:
+            self.select_key(selected_key or self._rows[0].key)
 
     @property
     def selected_key(self) -> str | None:
@@ -1140,6 +1153,10 @@ class DashboardApp(App[None]):
                 self.query_one(ExperimentsPane).set_snapshot(self.snapshot, self.selected_key)
                 self.query_one(ExperimentTreePane).select_key(self.selected_key)
                 self.query_one(ExperimentsPane).select_key(self.selected_key)
+            else:
+                self.query_one(ExperimentsPane).refresh_relative_fields(
+                    self.snapshot, self.selected_key
+                )
         finally:
             self._syncing_selection = False
 
@@ -1937,6 +1954,13 @@ def _entries_signature(snapshot: DashboardSnapshot) -> tuple[tuple[object, ...],
 
 def _is_recorded(entry: DashboardRow) -> bool:
     return isinstance(entry, DashboardEntry)
+
+
+def _ordered_dashboard_rows(snapshot: DashboardSnapshot) -> list[DashboardRow]:
+    return [
+        *sorted(snapshot.ongoing, key=lambda entry: entry.ref.lower()),
+        *sorted(snapshot.entries, key=lambda entry: entry.number, reverse=True),
+    ]
 
 
 def _tree_sort_key(entry: DashboardRow) -> tuple[int, int | str]:

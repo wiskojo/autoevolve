@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 
 from rich.text import Text
@@ -262,6 +263,33 @@ def test_dashboard_refresh_runs_async_without_overlap(history_repo: RepoFixture)
 
             while app._refresh_worker is not None:
                 await pilot.pause()
+
+    asyncio.run(run())
+
+
+def test_dashboard_refresh_updates_table_ages_without_rebuild(
+    history_repo: RepoFixture,
+) -> None:
+    async def run() -> None:
+        app = DashboardApp(cwd=history_repo.root, refresh_interval=0)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            table = app.query_one(ExperimentsPane)
+            original_rows = [entry.key for entry in table._rows]
+            selected = app.selected_key
+
+            updated_snapshot = replace(
+                app.snapshot,
+                best_age="99m ago",
+                latest_age="98m ago",
+                entries=tuple(replace(entry, age="97m ago") for entry in app.snapshot.entries),
+            )
+            app._apply_refreshed_snapshot(updated_snapshot)
+            await pilot.pause()
+
+            assert [entry.key for entry in table._rows] == original_rows
+            assert app.selected_key == selected
+            assert _plain(table.get_row_at(0)[5]) == "97m ago"
 
     asyncio.run(run())
 
