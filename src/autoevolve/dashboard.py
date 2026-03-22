@@ -98,6 +98,7 @@ class DashboardSnapshot:
     root_path: Path
     metric: str
     direction: MetricDirection
+    status_message: str | None
     records_count: int
     ongoing_count: int
     improvement_count: int
@@ -126,6 +127,52 @@ class CodeChangeFile:
 class CodeChangesView:
     summary: Text
     files: tuple[CodeChangeFile, ...]
+
+
+def _empty_snapshot(
+    root_path: Path,
+    *,
+    message: str,
+    metric: str = "",
+    direction: MetricDirection = "max",
+    records_count: int = 0,
+    ongoing: list[OngoingEntry] | None = None,
+) -> DashboardSnapshot:
+    ongoing_rows = ongoing or []
+    numbered_ongoing = [
+        OngoingEntry(
+            key=entry.key,
+            number=len(ongoing_rows) - index,
+            ref=entry.ref,
+            summary=entry.summary,
+            path=entry.path,
+            branch=entry.branch,
+            head=entry.head,
+            parent_key=entry.parent_key,
+            score=entry.score,
+            delta=entry.delta,
+            age=entry.age,
+        )
+        for index, entry in enumerate(ongoing_rows)
+    ]
+    return DashboardSnapshot(
+        root_path=root_path.resolve(),
+        metric=metric,
+        direction=direction,
+        status_message=message,
+        records_count=records_count,
+        ongoing_count=len(numbered_ongoing),
+        improvement_count=0,
+        best_sha="",
+        best_score=0.0,
+        best_age="",
+        latest_sha="",
+        latest_summary="",
+        latest_age="",
+        entries=(),
+        ongoing=tuple(numbered_ongoing),
+        frontier=(),
+    )
 
 
 class ExperimentDetailScreen(ModalScreen[None]):
@@ -484,7 +531,8 @@ class DashboardHeader(Static):
         left = Text()
         left.append(" autoevolve ", style="bold #f3f4f6 on #1c2128")
         left.append(f" {snapshot.root_path.name}", style="bold #e5e7eb")
-        left.append(f"  {snapshot.direction} {snapshot.metric}", style="#a8b0bc")
+        if snapshot.metric:
+            left.append(f"  {snapshot.direction} {snapshot.metric}", style="#a8b0bc")
         right = Text(refreshed, style="#8b95a7")
 
         width = max(self.content_region.width, self.size.width)
@@ -634,6 +682,16 @@ class FrontierPane(Static):
             self.update(_title("frontier"), layout=False)
             return
         snapshot = self._snapshot
+        if not snapshot.frontier:
+            self.update(
+                Group(
+                    _frontier_header(snapshot),
+                    Text(""),
+                    Text(snapshot.status_message or "Waiting for experiments.", style="#8b95a7"),
+                ),
+                layout=False,
+            )
+            return
         width = max(self.content_region.width, 60)
         height = max(self.content_region.height, 10)
         lines = [
@@ -742,7 +800,7 @@ class ExperimentsPane(DataTable[object]):
             return
         width = max(self.content_region.width, 32)
         recorded_rows = [entry for entry in self._rows if isinstance(entry, DashboardEntry)]
-        ref_width = max(14, *(len(entry.ref) + 1 for entry in recorded_rows))
+        ref_width = max([14, *(len(entry.ref) + 1 for entry in recorded_rows)])
         score_width = max(
             12,
             *(len(_format_score(entry.score)) + 1 for entry in recorded_rows),
@@ -984,7 +1042,7 @@ class DashboardApp(App[None]):
         self.refresh_interval = refresh_interval
         self.snapshot = load_dashboard_snapshot(cwd)
         self._entries_signature = _entries_signature(self.snapshot)
-        self.selected_key = self.snapshot.best_sha
+        self.selected_key = _snapshot_selected_key(self.snapshot)
         self._last_refreshed_at = datetime.now().astimezone()
         self._syncing_selection = False
         self._interaction_ready = False
@@ -1068,7 +1126,7 @@ class DashboardApp(App[None]):
             *(entry.key for entry in self.snapshot.ongoing),
         }
         if self.selected_key not in valid_keys:
-            self.selected_key = self.snapshot.best_sha
+            self.selected_key = _snapshot_selected_key(self.snapshot)
             reload_data = True
         self._apply_snapshot("refreshed", reload_data=reload_data)
 
@@ -1180,9 +1238,27 @@ class DashboardApp(App[None]):
 
 
 def load_dashboard_snapshot(cwd: str | Path = ".") -> DashboardSnapshot:
-    repository = ExperimentRepository(cwd)
-    problem = repository.problem()
+    cwd_path = Path(cwd).resolve()
+    try:
+        repository = ExperimentRepository(cwd)
+    except RuntimeError:
+        return _empty_snapshot(
+            cwd_path,
+            message="Waiting for a git repository in this directory.",
+        )
+
+    ongoing_entries = _ongoing_entries(repository)
     records = sorted(repository.index(), key=lambda record: _parse_date(record.date))
+    try:
+        problem = repository.problem()
+    except (FileNotFoundError, ValueError):
+        return _empty_snapshot(
+            repository.root,
+            message="Waiting for a valid PROBLEM.md.",
+            records_count=len(records),
+            ongoing=ongoing_entries,
+        )
+
     entries: list[DashboardEntry] = []
     frontier: list[FrontierPoint] = []
     best_record: ExperimentIndexEntry | None = None
@@ -1226,10 +1302,21 @@ def load_dashboard_snapshot(cwd: str | Path = ".") -> DashboardSnapshot:
         )
 
     if best_record is None or best_score is None or not frontier:
-        raise RuntimeError(f'No experiments found with a numeric "{problem.metric}" metric.')
+        message = (
+            f'Waiting for recorded experiments with numeric "{problem.metric}" values.'
+            if records
+            else "Waiting for recorded experiments."
+        )
+        return _empty_snapshot(
+            repository.root,
+            message=message,
+            metric=problem.metric,
+            direction=problem.direction,
+            records_count=len(records),
+            ongoing=ongoing_entries,
+        )
 
     latest = max(records, key=lambda record: _parse_date(record.date))
-    ongoing_entries = _ongoing_entries(repository)
     ongoing_entries = [
         OngoingEntry(
             key=entry.key,
@@ -1251,6 +1338,7 @@ def load_dashboard_snapshot(cwd: str | Path = ".") -> DashboardSnapshot:
         root_path=repository.root,
         metric=problem.metric,
         direction=problem.direction,
+        status_message=None,
         records_count=len(records),
         ongoing_count=len(ongoing_entries),
         improvement_count=improvement_count,
@@ -1266,13 +1354,26 @@ def load_dashboard_snapshot(cwd: str | Path = ".") -> DashboardSnapshot:
     )
 
 
+def _snapshot_selected_key(snapshot: DashboardSnapshot) -> str:
+    if snapshot.best_sha:
+        return snapshot.best_sha
+    if snapshot.ongoing:
+        return snapshot.ongoing[0].key
+    if snapshot.entries:
+        return snapshot.entries[-1].key
+    return ""
+
+
 def _frontier_header(snapshot: DashboardSnapshot) -> Text:
     text = Text()
     text.append(" FRONTIER ", style="bold #f9fafb")
     text.append(f"{snapshot.records_count} experiments  ", style="#a8b0bc")
-    text.append(f"{snapshot.improvement_count} improvements  ", style="bold #5ee9b5")
-    text.append(f"best {snapshot.best_score}  ", style="bold #f9fafb")
-    text.append(snapshot.best_age, style="#a8b0bc")
+    if snapshot.ongoing_count:
+        text.append(f"{snapshot.ongoing_count} ongoing  ", style="#a8b0bc")
+    if snapshot.frontier:
+        text.append(f"{snapshot.improvement_count} improvements  ", style="bold #5ee9b5")
+        text.append(f"best {snapshot.best_score}  ", style="bold #f9fafb")
+        text.append(snapshot.best_age, style="#a8b0bc")
     return text
 
 
@@ -1809,24 +1910,28 @@ def _node_depth(node: TreeNode[str | None]) -> int:
 
 
 def _entries_signature(snapshot: DashboardSnapshot) -> tuple[tuple[object, ...], ...]:
-    return tuple(
-        (
-            entry.key,
-            entry.parent_key,
-            entry.summary,
-            entry.score,
-            entry.delta,
-            entry.improved,
+    return (
+        ((snapshot.status_message,),)
+        + tuple(
+            (
+                entry.key,
+                entry.parent_key,
+                entry.summary,
+                entry.score,
+                entry.delta,
+                entry.improved,
+            )
+            for entry in snapshot.entries
         )
-        for entry in snapshot.entries
-    ) + tuple(
-        (
-            ongoing.key,
-            ongoing.parent_key,
-            ongoing.ref,
-            ongoing.summary,
+        + tuple(
+            (
+                ongoing.key,
+                ongoing.parent_key,
+                ongoing.ref,
+                ongoing.summary,
+            )
+            for ongoing in snapshot.ongoing
         )
-        for ongoing in snapshot.ongoing
     )
 
 

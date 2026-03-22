@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from rich.text import Text
 from textual.content import Content
@@ -27,6 +28,7 @@ def _plain(value: object) -> str:
 def test_dashboard_snapshot(history_repo: RepoFixture) -> None:
     snapshot = load_dashboard_snapshot(history_repo.root)
     assert snapshot.metric == "benchmark_score"
+    assert snapshot.status_message is None
     assert snapshot.direction == "max"
     assert snapshot.records_count == 12
     assert snapshot.ongoing_count == 0
@@ -43,6 +45,53 @@ def test_dashboard_snapshot(history_repo: RepoFixture) -> None:
         selected_sha=snapshot.entries[-1].sha,
     )
     assert any("│" in line.plain for line in selected_chart[:-2])
+
+
+def test_dashboard_snapshot_outside_git_repo(tmp_path: Path) -> None:
+    snapshot = load_dashboard_snapshot(tmp_path)
+    assert snapshot.status_message == "Waiting for a git repository in this directory."
+    assert snapshot.root_path == tmp_path.resolve()
+    assert snapshot.records_count == 0
+    assert snapshot.ongoing_count == 0
+    assert not snapshot.entries
+    assert not snapshot.frontier
+
+
+def test_dashboard_opens_before_first_record_and_recovers(repo: RepoFixture) -> None:
+    repo.init_other()
+
+    async def run() -> None:
+        app = DashboardApp(cwd=repo.root, refresh_interval=0)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            table = app.query_one(ExperimentsPane)
+            assert app.snapshot.status_message == "Waiting for recorded experiments."
+            assert table.row_count == 0
+
+            repo.run(
+                "start",
+                "alpha-branch",
+                "Start the first ongoing experiment after opening the dashboard.",
+                "--from",
+                "main",
+            )
+            alpha_path = repo.managed_worktree_path("alpha-branch")
+            (alpha_path / "EXPERIMENT.json").write_text(
+                '{\n  "summary": "Alpha branch appeared after dashboard startup.",\n'
+                '  "metrics": {},\n  "references": []\n}\n',
+                encoding="utf-8",
+            )
+
+            app._apply_refreshed_snapshot(load_dashboard_snapshot(repo.root))
+            await pilot.pause()
+
+            assert app.snapshot.status_message == "Waiting for recorded experiments."
+            assert table.row_count == 1
+            top_row = table.get_row_at(0)
+            assert _plain(top_row[2]).startswith("alpha-branch:")
+            assert app.selected_key == app.snapshot.ongoing[0].key
+
+    asyncio.run(run())
 
 
 def test_dashboard_selection_syncs_tree_and_table(history_repo: RepoFixture) -> None:
