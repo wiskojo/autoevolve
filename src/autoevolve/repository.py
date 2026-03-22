@@ -34,6 +34,19 @@ WORKTREE_ROOT = Path.home() / ".autoevolve" / "worktrees"
 WORKTREE_ROOT_DISPLAY = "~/.autoevolve/worktrees"
 
 
+def _worktree_root() -> Path:
+    return Path.home() / ".autoevolve" / "worktrees"
+
+
+def _is_managed_worktree_path(path: Path) -> bool:
+    resolved = path.resolve()
+    dynamic_root = _worktree_root().resolve()
+    if resolved == dynamic_root or dynamic_root in resolved.parents:
+        return True
+    parent = resolved.parent
+    return parent.name == "worktrees" and parent.parent.name == ".autoevolve"
+
+
 class ExperimentRepository:
     def __init__(self, cwd: str | Path = ".") -> None:
         self.root = find_repo_root(cwd)
@@ -91,7 +104,6 @@ class ExperimentRepository:
         return entry
 
     def active_worktrees(self) -> list[ExperimentWorktree]:
-        managed_root = WORKTREE_ROOT.resolve()
         worktrees: list[ExperimentWorktree] = []
 
         for item in list_linked_worktrees(self.repo):
@@ -107,7 +119,7 @@ class ExperimentRepository:
                     is_missing=is_missing,
                     is_current=item.is_current,
                     is_primary=item.is_primary,
-                    is_managed=managed_root in item.path.parents,
+                    is_managed=_is_managed_worktree_path(item.path),
                 )
             )
 

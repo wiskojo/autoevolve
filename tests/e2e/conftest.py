@@ -112,6 +112,9 @@ python3 scripts/validate.py
         self.run("init", "--harness", "other", "--yes")
         self.write_problem()
 
+    def managed_worktree_path(self, name: str) -> Path:
+        return self.home / ".autoevolve" / "worktrees" / name
+
     def populate_history(self) -> dict[str, str]:
         main_ref_name = self.git("branch", "--show-current").strip()
         commits: dict[str, str] = {}
@@ -177,3 +180,49 @@ def history_repo(repo: RepoFixture) -> RepoFixture:
     repo.commit_all("Initialize autoevolve")
     repo.populate_history()
     return repo
+
+
+@pytest.fixture
+def history_repo_with_ongoing(history_repo: RepoFixture) -> RepoFixture:
+    history_repo.run(
+        "start",
+        "alpha-branch",
+        "Continue from the best recorded experiment.",
+        "--from",
+        "cross/hybrid-final",
+    )
+    alpha_path = history_repo.managed_worktree_path("alpha-branch")
+    (alpha_path / "EXPERIMENT.json").write_text(
+        json.dumps(
+            {
+                "summary": "Alpha branch is exploring the strongest recorded lineage.",
+                "metrics": {},
+                "references": [],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    history_repo.run(
+        "start",
+        "main-fork",
+        "Fork directly from main without a recorded ancestor.",
+        "--from",
+        "main",
+    )
+    main_path = history_repo.managed_worktree_path("main-fork")
+    (main_path / "EXPERIMENT.json").write_text(
+        json.dumps(
+            {
+                "summary": "Main fork is still defining its first real experiment.",
+                "metrics": {},
+                "references": [],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return history_repo

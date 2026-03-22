@@ -152,3 +152,15 @@ def update(
         typer.echo("skipped:")
         for path in skipped:
             typer.echo(f"  - {path}")
+
+
+@app.command(
+    "dashboard",
+    rich_help_panel="Human",
+    short_help="Open the experiment dashboard.",
+    help="Open the experiment dashboard.\n\nMonitor experiment progress in an interactive TUI.",
+)
+def dashboard() -> None:
+    from autoevolve.dashboard import DashboardApp
+
+    DashboardApp(cwd=".").run()

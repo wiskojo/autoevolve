@@ -43,26 +43,27 @@ Options:
   --help  Show this message and exit.
 
 Human:
-  init      Set up PROBLEM.md and agent instructions.
-  validate  Check that the repo is ready for autoevolve.
-  update    Update detected prompt files to the latest version.
+  init       Set up PROBLEM.md and agent instructions.
+  validate   Check that the repo is ready for autoevolve.
+  update     Update detected prompt files to the latest version.
+  dashboard  Open the experiment dashboard.
 
 Lifecycle:
-  start     Create a managed experiment branch and worktree.
-  record    Validate, commit, and remove the current managed worktree.
-  clean     Remove stale managed worktrees for this repository.
+  start      Create a managed experiment branch and worktree.
+  record     Validate, commit, and remove the current managed worktree.
+  clean      Remove stale managed worktrees for this repository.
 
 Inspect:
-  status    Show the current experiment status.
-  log       Show experiment logs.
-  show      Show experiment details.
-  compare   Compare two experiments.
-  lineage   Show experiment lineage around one ref.
+  status     Show the current experiment status.
+  log        Show experiment logs.
+  show       Show experiment details.
+  compare    Compare two experiments.
+  lineage    Show experiment lineage around one ref.
 
 Analytics:
-  recent    List the most recent recorded experiments.
-  best      List the top experiments for one metric.
-  pareto    List the Pareto frontier for selected metrics.
+  recent     List the most recent recorded experiments.
+  best       List the top experiments for one metric.
+  pareto     List the Pareto frontier for selected metrics.
 
 Examples:
   autoevolve start tune-thresholds "Try a tighter threshold sweep" --from 07f1844
