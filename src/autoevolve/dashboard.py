@@ -720,11 +720,7 @@ class ExperimentsPane(DataTable[object]):
         if old_coordinate == new_coordinate:
             return
         app = self.app
-        if (
-            isinstance(app, DashboardApp)
-            and not app._syncing_selection
-            and not app._resizing
-        ):
+        if isinstance(app, DashboardApp) and not app._syncing_selection and not app._resizing:
             key = self.selected_key
             if key is not None:
                 app._set_selected_key(key, source="table")
@@ -1079,12 +1075,8 @@ class DashboardApp(App[None]):
     def _apply_snapshot(self, status: str, *, reload_data: bool = True) -> None:
         self._syncing_selection = True
         try:
-            self.query_one(DashboardHeader).set_snapshot(
-                self.snapshot, self._last_refreshed_at
-            )
-            self.query_one(FrontierPane).set_snapshot(
-                self.snapshot, self._selected_record_sha()
-            )
+            self.query_one(DashboardHeader).set_snapshot(self.snapshot, self._last_refreshed_at)
+            self.query_one(FrontierPane).set_snapshot(self.snapshot, self._selected_record_sha())
             if reload_data:
                 self.query_one(ExperimentTreePane).set_snapshot(self.snapshot, self.selected_key)
                 self.query_one(ExperimentsPane).set_snapshot(self.snapshot, self.selected_key)
@@ -1147,9 +1139,7 @@ class DashboardApp(App[None]):
                     key,
                     center=source == "table",
                 )
-            self.query_one(FrontierPane).set_snapshot(
-                self.snapshot, self._selected_record_sha()
-            )
+            self.query_one(FrontierPane).set_snapshot(self.snapshot, self._selected_record_sha())
         finally:
             self._syncing_selection = False
 
@@ -1173,15 +1163,19 @@ class DashboardApp(App[None]):
         tree = self.query_one(ExperimentTreePane)
         if self.focused is table and table.selected_key is not None:
             self.selected_key = table.selected_key
-        elif self.focused is tree and tree.cursor_node is not None and isinstance(
-            tree.cursor_node.data, str
+        elif (
+            self.focused is tree
+            and tree.cursor_node is not None
+            and isinstance(tree.cursor_node.data, str)
         ):
             self.selected_key = tree.cursor_node.data
         tree.select_key(self.selected_key)
         table.select_key(self.selected_key)
 
     def _selected_record_sha(self) -> str | None:
-        entry = next((item for item in self.snapshot.entries if item.key == self.selected_key), None)
+        entry = next(
+            (item for item in self.snapshot.entries if item.key == self.selected_key), None
+        )
         return entry.sha if entry is not None else None
 
 
@@ -1938,6 +1932,7 @@ def _ongoing_summary(path: Path) -> str:
         return parse_experiment_document(experiment_path.read_text(encoding="utf-8")).summary
     except ValueError:
         return "(invalid EXPERIMENT.json)"
+
 
 def _numeric_metric(record: ExperimentIndexEntry, metric: str) -> float | None:
     value = record.document.metrics.get(metric)

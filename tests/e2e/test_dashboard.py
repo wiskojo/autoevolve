@@ -124,7 +124,9 @@ def test_dashboard_enter_opens_detail_modal(history_repo: RepoFixture) -> None:
             assert len(app.screen_stack) == 2
             tabs = app.screen.query_one("#detail-tabs", TabbedContent)
             assert tabs.active == "detail-experiment"
-            selected = next(entry for entry in app.snapshot.entries if entry.key == app.selected_key)
+            selected = next(
+                entry for entry in app.snapshot.entries if entry.key == app.selected_key
+            )
 
             header = app.screen.query_one("#detail-header", Static)
             text = _plain(header.render())
