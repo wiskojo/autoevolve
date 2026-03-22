@@ -11,6 +11,7 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
+from textual.coordinate import Coordinate
 from textual.css.query import NoMatches
 from textual.events import Resize
 from textual.geometry import Size
@@ -689,15 +690,14 @@ class ExperimentsPane(DataTable[object]):
     def selected_key(self) -> str | None:
         if not self.row_count or not self.is_valid_row_index(self.cursor_row):
             return None
-        value = self.ordered_rows[self.cursor_row].key.value
-        return value if isinstance(value, str) else None
+        return self._rows[self.cursor_row].key
 
     def select_key(self, key: str) -> None:
         if not self.row_count:
             return
         try:
-            row = self.get_row_index(key)
-        except KeyError:
+            row = next(index for index, entry in enumerate(self._rows) if entry.key == key)
+        except StopIteration:
             return
         self.move_cursor(row=row, column=0, animate=False)
 
@@ -710,6 +710,24 @@ class ExperimentsPane(DataTable[object]):
     def on_resize(self) -> None:
         if self._snapshot is not None:
             self._refresh_view(self.selected_key)
+
+    def watch_cursor_coordinate(
+        self,
+        old_coordinate: Coordinate,
+        new_coordinate: Coordinate,
+    ) -> None:
+        super().watch_cursor_coordinate(old_coordinate, new_coordinate)
+        if old_coordinate == new_coordinate:
+            return
+        app = self.app
+        if (
+            isinstance(app, DashboardApp)
+            and not app._syncing_selection
+            and not app._resizing
+        ):
+            key = self.selected_key
+            if key is not None:
+                app._set_selected_key(key, source="table")
 
     def action_open_detail(self) -> None:
         app = self.app
@@ -1070,29 +1088,31 @@ class DashboardApp(App[None]):
             if reload_data:
                 self.query_one(ExperimentTreePane).set_snapshot(self.snapshot, self.selected_key)
                 self.query_one(ExperimentsPane).set_snapshot(self.snapshot, self.selected_key)
+                self.query_one(ExperimentTreePane).select_key(self.selected_key)
+                self.query_one(ExperimentsPane).select_key(self.selected_key)
         finally:
             self._syncing_selection = False
-        if reload_data:
-            self.query_one(ExperimentTreePane).select_key(self.selected_key)
-            self.query_one(ExperimentsPane).select_key(self.selected_key)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id != "experiments" or self._syncing_selection or self._resizing:
             return
-        if isinstance(event.row_key.value, str):
-            self._set_selected_key(event.row_key.value, source="table")
+        key = self.query_one(ExperimentsPane).selected_key
+        if key is not None:
+            self._set_selected_key(key, source="table")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id != "experiments" or self._resizing:
             return
-        if isinstance(event.row_key.value, str):
-            self._set_selected_key(event.row_key.value, source="table")
+        key = self.query_one(ExperimentsPane).selected_key
+        if key is not None:
+            self._set_selected_key(key, source="table")
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[str | None]) -> None:
         if (
             event.control.id != "tree"
             or self._syncing_selection
             or self._resizing
+            or self.focused is not event.control
             or not self._widgets_ready()
             or not self._interaction_ready
         ):
@@ -1106,6 +1126,7 @@ class DashboardApp(App[None]):
             event.control.id != "tree"
             or self._syncing_selection
             or self._resizing
+            or self.focused is not event.control
             or not self._widgets_ready()
             or not self._interaction_ready
         ):
@@ -1148,8 +1169,16 @@ class DashboardApp(App[None]):
         self._resize_timer = None
         if not self._widgets_ready():
             return
-        self.query_one(ExperimentTreePane).select_key(self.selected_key)
-        self.query_one(ExperimentsPane).select_key(self.selected_key)
+        table = self.query_one(ExperimentsPane)
+        tree = self.query_one(ExperimentTreePane)
+        if self.focused is table and table.selected_key is not None:
+            self.selected_key = table.selected_key
+        elif self.focused is tree and tree.cursor_node is not None and isinstance(
+            tree.cursor_node.data, str
+        ):
+            self.selected_key = tree.cursor_node.data
+        tree.select_key(self.selected_key)
+        table.select_key(self.selected_key)
 
     def _selected_record_sha(self) -> str | None:
         entry = next((item for item in self.snapshot.entries if item.key == self.selected_key), None)

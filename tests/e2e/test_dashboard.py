@@ -215,6 +215,59 @@ def test_dashboard_refresh_runs_async_without_overlap(history_repo: RepoFixture)
     asyncio.run(run())
 
 
+def test_dashboard_structural_refresh_keeps_widgets_in_sync(
+    history_repo_with_ongoing: RepoFixture,
+) -> None:
+    async def run() -> None:
+        app = DashboardApp(cwd=history_repo_with_ongoing.root, refresh_interval=0)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            table = app.query_one(ExperimentsPane)
+            tree = app.query_one(ExperimentTreePane)
+
+            table.focus()
+            table.move_cursor(row=2, column=0, animate=False)
+            await pilot.pause()
+            selected = app.selected_key
+            assert selected is not None
+            assert table.selected_key == selected
+            assert tree.cursor_node is not None
+            assert tree.cursor_node.data == selected
+
+            history_repo_with_ongoing.run(
+                "start",
+                "zeta-branch",
+                "Add another ongoing worktree during dashboard refresh.",
+                "--from",
+                "cross/hybrid-final",
+            )
+            zeta_path = history_repo_with_ongoing.managed_worktree_path("zeta-branch")
+            (zeta_path / "EXPERIMENT.json").write_text(
+                '{\n  "summary": "Zeta branch is a live refresh regression test.",\n'
+                '  "metrics": {},\n  "references": []\n}\n',
+                encoding="utf-8",
+            )
+
+            app._apply_refreshed_snapshot(load_dashboard_snapshot(history_repo_with_ongoing.root))
+            await pilot.pause()
+            assert table.row_count == 15
+            assert app.selected_key == selected
+            assert table.selected_key == selected
+            assert tree.cursor_node is not None
+            assert tree.cursor_node.data == selected
+
+            history_repo_with_ongoing.run("clean", "zeta-branch", "--force")
+            app._apply_refreshed_snapshot(load_dashboard_snapshot(history_repo_with_ongoing.root))
+            await pilot.pause()
+            assert table.row_count == 14
+            assert app.selected_key == selected
+            assert table.selected_key == selected
+            assert tree.cursor_node is not None
+            assert tree.cursor_node.data == selected
+
+    asyncio.run(run())
+
+
 def test_dashboard_ongoing_rows_and_tree_attachment(
     history_repo_with_ongoing: RepoFixture,
 ) -> None:
