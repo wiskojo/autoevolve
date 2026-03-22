@@ -3,7 +3,7 @@ from typing import Annotated
 
 import typer
 
-from autoevolve.models.experiment import ExperimentRecord, Objective
+from autoevolve.models.experiment import ExperimentIndexEntry, Objective
 from autoevolve.models.types import SetOutputFormat
 from autoevolve.repository import ExperimentRepository
 
@@ -27,7 +27,7 @@ def recent(
         typer.Option("--format", help="Output format."),
     ] = SetOutputFormat.TSV,
 ) -> None:
-    _print_records(ExperimentRepository().recent_records(limit), output_format)
+    _print_records(ExperimentRepository().recent_index(limit), output_format)
 
 
 @app.command(
@@ -115,7 +115,7 @@ def pareto(
     _print_records(records, output_format)
 
 
-def _print_records(records: list[ExperimentRecord], output_format: SetOutputFormat) -> None:
+def _print_records(records: list[ExperimentIndexEntry], output_format: SetOutputFormat) -> None:
     if not records:
         typer.echo("No experiments found.")
         return
@@ -128,7 +128,7 @@ def _print_records(records: list[ExperimentRecord], output_format: SetOutputForm
         typer.echo(json.dumps(_json_record(record)))
 
 
-def _tsv_row(record: ExperimentRecord) -> str:
+def _tsv_row(record: ExperimentIndexEntry) -> str:
     return "\t".join(
         [
             record.sha[:7],
@@ -139,7 +139,7 @@ def _tsv_row(record: ExperimentRecord) -> str:
     )
 
 
-def _json_record(record: ExperimentRecord) -> dict[str, object]:
+def _json_record(record: ExperimentIndexEntry) -> dict[str, object]:
     return {
         "sha": record.sha,
         "short_sha": record.sha[:7],
@@ -153,7 +153,7 @@ def _json_record(record: ExperimentRecord) -> dict[str, object]:
     }
 
 
-def _metric_pairs(record: ExperimentRecord) -> str:
+def _metric_pairs(record: ExperimentIndexEntry) -> str:
     return ", ".join(
         f"{name}={json.dumps(value)}" for name, value in record.document.metrics.items()
     )

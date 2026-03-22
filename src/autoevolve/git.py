@@ -1,11 +1,12 @@
 import os
+import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
 from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 
-from autoevolve.models.git import GitChangedPath, GitDiff, GitWorktree
+from autoevolve.models.git import GitChangedPath, GitCommit, GitDiff, GitWorktree
 
 
 def open_repo(cwd: str | Path = ".") -> Repo:
@@ -57,6 +58,81 @@ def list_linked_worktrees(repo: Repo, current_path: str | Path | None = None) ->
         entry[key] = value
 
     return worktrees
+
+
+def list_experiment_commits(repo: Repo, path: str, limit: int | None = None) -> list[GitCommit]:
+    args = ["log", "--all", "--format=%H%x09%cI%x09%P"]
+    if limit is not None:
+        args.append(f"-n{limit}")
+    args.extend(["--", path])
+    lines = _git(repo, *args).splitlines()
+    commits: list[GitCommit] = []
+    seen: set[str] = set()
+    for line in lines:
+        if not line:
+            continue
+        sha, date, parents = (line.split("\t", 2) + ["", ""])[:3]
+        if sha in seen:
+            continue
+        seen.add(sha)
+        commits.append(
+            GitCommit(
+                sha=sha,
+                date=date,
+                parents=tuple(parent for parent in parents.split() if parent),
+            )
+        )
+    return commits
+
+
+def read_text_blobs(repo: Repo, refs: Iterable[str], path: str) -> dict[str, str | None]:
+    requested = list(dict.fromkeys(refs))
+    if not requested:
+        return {}
+    command = [
+        "git",
+        "-C",
+        str(Path(repo.working_tree_dir or ".").resolve()),
+        "cat-file",
+        "--batch",
+    ]
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+    process.stdin.write("".join(f"{ref}:{path}\n" for ref in requested).encode("utf-8"))
+    process.stdin.close()
+
+    result: dict[str, str | None] = {}
+    for ref in requested:
+        header = process.stdout.readline()
+        if not header:
+            raise RuntimeError("git cat-file returned incomplete output.")
+        if header.endswith(b" missing\n"):
+            result[ref] = None
+            continue
+        parts = header.rstrip(b"\n").split()
+        if len(parts) != 3 or parts[1] != b"blob":
+            raise RuntimeError(header.decode("utf-8", errors="replace").strip())
+        size = int(parts[2])
+        data = process.stdout.read(size)
+        process.stdout.read(1)
+        result[ref] = data.decode("utf-8")
+
+    stderr = process.stderr.read().decode("utf-8", errors="replace").strip()
+    return_code = process.wait()
+    if return_code != 0:
+        raise RuntimeError(stderr or "git cat-file failed.")
+    return result
+
+
+def read_text_blob(repo: Repo, ref: str, path: str) -> str | None:
+    return read_text_blobs(repo, [ref], path).get(ref)
 
 
 def diff(repo: Repo, left: str, right: str, *, exclude: Iterable[str] = ()) -> GitDiff:

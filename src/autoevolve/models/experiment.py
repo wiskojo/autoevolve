@@ -25,10 +25,10 @@ class ExperimentDocument:
 
 
 @dataclass(frozen=True)
-class ExperimentRecord:
+class ExperimentIndexEntry:
     sha: str
     date: str
-    journal: str
+    parents: tuple[str, ...]
     document: ExperimentDocument
 
 
@@ -49,6 +49,12 @@ class ExperimentWorktree:
 class Objective:
     direction: MetricDirection
     metric: str
+
+
+@dataclass(frozen=True)
+class ExperimentDetail:
+    experiment_text: str
+    journal: str
 
 
 @dataclass(frozen=True)

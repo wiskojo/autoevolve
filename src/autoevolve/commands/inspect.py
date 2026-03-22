@@ -6,8 +6,9 @@ import typer
 
 from autoevolve.git import diff
 from autoevolve.models.experiment import (
+    ExperimentDetail,
     ExperimentDocument,
-    ExperimentRecord,
+    ExperimentIndexEntry,
     ExperimentWorktree,
     Objective,
 )
@@ -35,7 +36,7 @@ app = typer.Typer()
 )
 def status() -> None:
     repository = ExperimentRepository()
-    records = repository.records()
+    records = repository.index()
     worktrees = repository.active_worktrees()
     managed = [
         worktree for worktree in worktrees if worktree.is_managed and not worktree.is_primary
@@ -70,11 +71,14 @@ def status() -> None:
 def log(
     limit: Annotated[int, typer.Option(min=1, help="Number of experiments to show.")] = 10,
 ) -> None:
-    records = ExperimentRepository().recent_records(limit)
-    if not records:
+    repository = ExperimentRepository()
+    entries = repository.recent_index(limit)
+    if not entries:
         typer.echo("No experiments found.")
         return
-    typer.echo("\n\n".join(_render_log_record(record) for record in records))
+    typer.echo(
+        "\n\n".join(_render_log_record(entry, repository.detail(entry.sha)) for entry in entries)
+    )
 
 
 @app.command(
@@ -90,23 +94,23 @@ def log(
 )
 def show(ref: str) -> None:
     repository = ExperimentRepository()
-    record = repository.resolve_record(ref)
-    previous = repository.previous_record(record)
-    parents = repository.repo.commit(record.sha).parents
-    base = previous.sha if previous is not None else (parents[0].hexsha if parents else None)
+    entry = repository.resolve_index(ref)
+    detail = repository.detail(entry.sha)
+    previous = repository.previous_record(entry)
+    base = previous.sha if previous is not None else (entry.parents[0] if entry.parents else None)
     patch = (
         diff(
             repository.repo,
             base,
-            record.sha,
+            entry.sha,
             exclude=(EXPERIMENT_FILE, JOURNAL_FILE),
         ).patch
         if base is not None
         else ""
     )
     lines = []
-    lines.extend(_section("experiment", _experiment_lines(record.document)))
-    lines.extend(_section("journal", record.journal.splitlines()))
+    lines.extend(_section("experiment", _experiment_lines(entry.document)))
+    lines.extend(_section("journal", detail.journal.splitlines()))
     lines.extend(_section("code diff", patch.splitlines() if patch else []))
     typer.echo("\n".join(lines).rstrip())
 
@@ -123,8 +127,8 @@ def show(ref: str) -> None:
 )
 def compare(left_ref: str, right_ref: str) -> None:
     repository = ExperimentRepository()
-    left = repository.resolve_record(left_ref)
-    right = repository.resolve_record(right_ref)
+    left = repository.resolve_index(left_ref)
+    right = repository.resolve_index(right_ref)
     comparison = diff(
         repository.repo,
         left.sha,
@@ -219,7 +223,7 @@ def lineage(
 
 def _project_lines(
     repository: ExperimentRepository,
-    records: list[ExperimentRecord],
+    records: list[ExperimentIndexEntry],
     managed: list[ExperimentWorktree],
 ) -> list[str]:
     lines = [f"experiments: {len(records)} recorded ({len(managed)} ongoing)"]
@@ -248,7 +252,7 @@ def _project_lines(
 def _recent_experiment_lines(
     repository: ExperimentRepository,
 ) -> list[str]:
-    recent = repository.recent_records(5)
+    recent = repository.recent_index(5)
     if not recent:
         return []
     try:
@@ -301,7 +305,7 @@ def _other_worktree_lines(worktrees: list[ExperimentWorktree]) -> list[str]:
     return lines
 
 
-def _render_log_record(record: ExperimentRecord) -> str:
+def _render_log_record(record: ExperimentIndexEntry, detail: ExperimentDetail) -> str:
     lines = [f"commit {record.sha[:7]}", f"date: {record.date}"]
     lines.extend(
         _section(
@@ -314,11 +318,11 @@ def _render_log_record(record: ExperimentRecord) -> str:
             blank_line=False,
         )
     )
-    lines.extend(_section("journal", record.journal.splitlines(), blank_line=False))
+    lines.extend(_section("journal", detail.journal.splitlines(), blank_line=False))
     return "\n".join(lines)
 
 
-def _record_header(record: ExperimentRecord) -> str:
+def _record_header(record: ExperimentIndexEntry) -> str:
     header = "  ".join([record.sha[:7], record.date])
     metrics = _metric_inline(record.document.metrics)
     summary = f"| {record.document.summary}"
@@ -345,7 +349,7 @@ def _metric_lines(metrics: dict[str, MetricValue]) -> list[str]:
     return [f"{name}: {json.dumps(value)}" for name, value in metrics.items()]
 
 
-def _metric_delta_lines(left: ExperimentRecord, right: ExperimentRecord) -> list[str]:
+def _metric_delta_lines(left: ExperimentIndexEntry, right: ExperimentIndexEntry) -> list[str]:
     lines: list[str] = []
     for name in sorted(set(left.document.metrics) | set(right.document.metrics)):
         left_value = left.document.metrics.get(name)
@@ -365,7 +369,7 @@ def _metric_delta_lines(left: ExperimentRecord, right: ExperimentRecord) -> list
     return lines
 
 
-def _reference_diff_lines(left: ExperimentRecord, right: ExperimentRecord) -> list[str]:
+def _reference_diff_lines(left: ExperimentIndexEntry, right: ExperimentIndexEntry) -> list[str]:
     left_refs = {reference.commit for reference in left.document.references}
     right_refs = {reference.commit for reference in right.document.references}
     return [
@@ -447,7 +451,9 @@ def _duration_ms(duration_ms: int) -> str:
     return "0s"
 
 
-def _recent_trend(records: list[ExperimentRecord], metric: str) -> tuple[float, int, int] | None:
+def _recent_trend(
+    records: list[ExperimentIndexEntry], metric: str
+) -> tuple[float, int, int] | None:
     sample = [
         record
         for record in sorted(records, key=lambda record: _parse_date(record.date), reverse=True)

@@ -3,17 +3,26 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-from git.exc import BadName, GitCommandError
+from git.exc import BadName
 
-from autoevolve.git import find_repo_root, list_linked_worktrees, open_repo
+from autoevolve.git import (
+    find_repo_root,
+    list_experiment_commits,
+    list_linked_worktrees,
+    open_repo,
+    read_text_blob,
+    read_text_blobs,
+)
 from autoevolve.models.experiment import (
+    ExperimentDetail,
     ExperimentDocument,
-    ExperimentRecord,
+    ExperimentIndexEntry,
     ExperimentReference,
     ExperimentWorktree,
     Objective,
     ProblemSpec,
 )
+from autoevolve.models.git import GitCommit
 from autoevolve.models.lineage import LineageEdge, LineageGraph
 from autoevolve.models.types import GraphDirection, GraphEdges, MetricValue
 from autoevolve.problem import parse_problem_spec
@@ -29,36 +38,57 @@ class ExperimentRepository:
     def __init__(self, cwd: str | Path = ".") -> None:
         self.root = find_repo_root(cwd)
         self.repo = open_repo(self.root)
-        self._records: list[ExperimentRecord] | None = None
+        self._index: list[ExperimentIndexEntry] | None = None
+        self._index_by_sha: dict[str, ExperimentIndexEntry] = {}
+        self._details_by_sha: dict[str, ExperimentDetail] = {}
+        self._parents_by_sha: dict[str, tuple[str, ...]] = {}
+        self._problem: ProblemSpec | None = None
 
     def problem(self) -> ProblemSpec:
-        problem_path = self.root / PROBLEM_FILE
-        if not problem_path.exists():
-            raise FileNotFoundError(f"Missing {PROBLEM_FILE}. Run autoevolve init first.")
-        return parse_problem_spec(problem_path.read_text(encoding="utf-8"))
+        if self._problem is None:
+            problem_path = self.root / PROBLEM_FILE
+            if not problem_path.exists():
+                raise FileNotFoundError(f"Missing {PROBLEM_FILE}. Run autoevolve init first.")
+            self._problem = parse_problem_spec(problem_path.read_text(encoding="utf-8"))
+        return self._problem
 
-    def records(self) -> list[ExperimentRecord]:
-        if self._records is None:
-            records: list[ExperimentRecord] = []
-            for sha in self._record_shas():
-                record = self._load_record(sha)
-                if record is not None:
-                    records.append(record)
-            self._records = records
-        return list(self._records)
+    def index(self) -> list[ExperimentIndexEntry]:
+        if self._index is None:
+            self._index = self._build_index(list_experiment_commits(self.repo, EXPERIMENT_FILE))
+        return list(self._index)
 
-    def resolve_record(self, ref: str) -> ExperimentRecord:
+    def recent_index(self, limit: int) -> list[ExperimentIndexEntry]:
+        return self._build_index(list_experiment_commits(self.repo, EXPERIMENT_FILE, limit=limit))
+
+    def detail(self, ref: str) -> ExperimentDetail:
         sha = self._resolve_commit(ref)
-        record = self.record_by_sha(sha)
-        if record is None:
+        cached = self._details_by_sha.get(sha)
+        if cached is not None:
+            return cached
+        detail = self._load_detail(sha)
+        if detail is None:
             raise ValueError(f'"{ref}" does not resolve to a recorded experiment.')
-        return record
+        self._details_by_sha[sha] = detail
+        return detail
 
-    def record_by_sha(self, sha: str) -> ExperimentRecord | None:
-        for record in self.records():
-            if record.sha == sha:
-                return record
-        return self._load_record(sha)
+    def resolve_index(self, ref: str) -> ExperimentIndexEntry:
+        sha = self._resolve_commit(ref)
+        entry = self.record_by_sha(sha)
+        if entry is None:
+            raise ValueError(f'"{ref}" does not resolve to a recorded experiment.')
+        return entry
+
+    def record_by_sha(self, sha: str) -> ExperimentIndexEntry | None:
+        cached = self._index_by_sha.get(sha)
+        if cached is not None:
+            return cached
+        if self._index is not None:
+            return None
+        entry = self._load_index_entry(sha)
+        if entry is not None:
+            self._index_by_sha[sha] = entry
+            self._parents_by_sha[sha] = entry.parents
+        return entry
 
     def active_worktrees(self) -> list[ExperimentWorktree]:
         managed_root = WORKTREE_ROOT.resolve()
@@ -83,9 +113,9 @@ class ExperimentRepository:
 
         return worktrees
 
-    def nearest_record(self, ref: str) -> ExperimentRecord | None:
+    def nearest_record(self, ref: str) -> ExperimentIndexEntry | None:
         start = self._resolve_commit(ref)
-        record_map = self._record_map()
+        record_map = self._index_map()
         queue = deque([start])
         seen = {start}
 
@@ -101,31 +131,27 @@ class ExperimentRepository:
 
         return None
 
-    def previous_record(self, record: ExperimentRecord) -> ExperimentRecord | None:
-        queue = deque(self._parents(record.sha))
+    def previous_record(self, record: ExperimentIndexEntry) -> ExperimentIndexEntry | None:
+        queue = deque(record.parents)
         seen = {record.sha}
+        record_map = self._index_map()
 
         while queue:
             sha = queue.popleft()
             if sha in seen:
                 continue
             seen.add(sha)
-            previous = self._record_map().get(sha)
+            previous = record_map.get(sha)
             if previous is not None:
                 return previous
             queue.extend(self._parents(sha))
 
         return None
 
-    def recent_records(self, limit: int) -> list[ExperimentRecord]:
-        return sorted(self.records(), key=lambda record: _sort_date(record.date), reverse=True)[
-            :limit
-        ]
-
-    def best_records(self, objective: Objective, limit: int) -> list[ExperimentRecord]:
+    def best_records(self, objective: Objective, limit: int) -> list[ExperimentIndexEntry]:
         numeric_records = [
             record
-            for record in self.records()
+            for record in self.index()
             if _numeric_metric(record, objective.metric) is not None
         ]
         return sorted(numeric_records, key=lambda record: _best_key(record, objective))[:limit]
@@ -134,10 +160,10 @@ class ExperimentRepository:
         self,
         objectives: list[Objective],
         limit: int | None = None,
-    ) -> list[ExperimentRecord]:
+    ) -> list[ExperimentIndexEntry]:
         candidates = [
             record
-            for record in self.records()
+            for record in self.index()
             if all(
                 _numeric_metric(record, objective.metric) is not None for objective in objectives
             )
@@ -161,7 +187,7 @@ class ExperimentRepository:
         direction: GraphDirection,
         depth: int | None,
     ) -> LineageGraph:
-        root = self.resolve_record(ref)
+        root = self.resolve_index(ref)
         backward = self._backward_edges()
         forward = self._forward_edges(backward)
         queue = deque([(root.sha, 0)])
@@ -198,10 +224,10 @@ class ExperimentRepository:
         )
         return LineageGraph(root=root, node_order=tuple(node_order), edges=graph_edges)
 
-    def git_relationship(self, left: ExperimentRecord, right: ExperimentRecord) -> str:
+    def git_relationship(self, left: ExperimentIndexEntry, right: ExperimentIndexEntry) -> str:
         base = self._merge_base(left.sha, right.sha)
-        left_parents = set(self._parents(left.sha))
-        right_parents = set(self._parents(right.sha))
+        left_parents = set(left.parents)
+        right_parents = set(right.parents)
         if right.sha in left_parents:
             return f"direct_parent_of_left (merge-base {right.sha[:7]})"
         if left.sha in right_parents:
@@ -216,10 +242,6 @@ class ExperimentRepository:
             return f"right_ancestor_of_left (merge-base {base[:7]})"
         return f"share_merge_base {base[:7]}"
 
-    def _record_shas(self) -> list[str]:
-        output = self.repo.git.log("--all", "--format=%H", "--", EXPERIMENT_FILE)
-        return list(dict.fromkeys(line for line in output.splitlines() if line))
-
     def _resolve_commit(self, ref: str) -> str:
         try:
             return self.repo.commit(ref).hexsha
@@ -227,7 +249,12 @@ class ExperimentRepository:
             raise ValueError(f'Unknown ref "{ref}".') from error
 
     def _parents(self, ref: str) -> tuple[str, ...]:
-        return tuple(parent.hexsha for parent in self.repo.commit(ref).parents)
+        cached = self._parents_by_sha.get(ref)
+        if cached is not None:
+            return cached
+        parents = tuple(parent.hexsha for parent in self.repo.commit(ref).parents)
+        self._parents_by_sha[ref] = parents
+        return parents
 
     def _merge_base(self, left: str, right: str) -> str | None:
         base = self.repo.merge_base(left, right)
@@ -235,34 +262,55 @@ class ExperimentRepository:
             return None
         return base[0].hexsha
 
-    def _read_file_at_ref(self, ref: str, path: str) -> str | None:
-        try:
-            return str(self.repo.git.show(f"{ref}:{path}"))
-        except GitCommandError:
-            return None
+    def _build_index(self, commits: list[GitCommit]) -> list[ExperimentIndexEntry]:
+        texts = read_text_blobs(self.repo, [commit.sha for commit in commits], EXPERIMENT_FILE)
+        entries: list[ExperimentIndexEntry] = []
+        self._index_by_sha = {}
+        for commit in commits:
+            experiment_text = texts.get(commit.sha)
+            if experiment_text is None:
+                continue
+            entry = ExperimentIndexEntry(
+                sha=commit.sha,
+                date=commit.date,
+                parents=commit.parents,
+                document=parse_experiment_document(experiment_text),
+            )
+            entries.append(entry)
+            self._index_by_sha[entry.sha] = entry
+            self._parents_by_sha[entry.sha] = entry.parents
+        return entries
 
-    def _load_record(self, sha: str) -> ExperimentRecord | None:
-        experiment_text = self._read_file_at_ref(sha, EXPERIMENT_FILE)
-        journal_text = self._read_file_at_ref(sha, JOURNAL_FILE)
-        if experiment_text is None or journal_text is None:
+    def _load_index_entry(self, sha: str) -> ExperimentIndexEntry | None:
+        experiment_text = read_text_blob(self.repo, sha, EXPERIMENT_FILE)
+        if experiment_text is None:
             return None
         commit = self.repo.commit(sha)
-        return ExperimentRecord(
+        return ExperimentIndexEntry(
             sha=commit.hexsha,
             date=commit.committed_datetime.isoformat(),
-            journal=journal_text,
+            parents=tuple(parent.hexsha for parent in commit.parents),
             document=parse_experiment_document(experiment_text),
         )
 
-    def _record_map(self) -> dict[str, ExperimentRecord]:
-        return {record.sha: record for record in self.records()}
+    def _load_detail(self, sha: str) -> ExperimentDetail | None:
+        experiment_text = read_text_blob(self.repo, sha, EXPERIMENT_FILE)
+        journal_text = read_text_blob(self.repo, sha, JOURNAL_FILE)
+        if experiment_text is None or journal_text is None:
+            return None
+        return ExperimentDetail(experiment_text=experiment_text, journal=journal_text)
+
+    def _index_map(self) -> dict[str, ExperimentIndexEntry]:
+        if self._index is None:
+            self.index()
+        return self._index_by_sha
 
     def _backward_edges(self) -> dict[str, list[LineageEdge]]:
-        record_map = self._record_map()
+        record_map = self._index_map()
         edges: dict[str, list[LineageEdge]] = {}
 
-        for record in self.records():
-            for parent in self._parents(record.sha):
+        for record in self.index():
+            for parent in record.parents:
                 if parent in record_map:
                     edges.setdefault(record.sha, []).append(
                         LineageEdge(kind="git", source=record.sha, target=parent)
@@ -341,7 +389,7 @@ def _is_metric_value(value: object) -> bool:
     return value is None or isinstance(value, (bool, int, float, str))
 
 
-def _numeric_metric(record: ExperimentRecord, metric: str) -> float | None:
+def _numeric_metric(record: ExperimentIndexEntry, metric: str) -> float | None:
     value = record.document.metrics.get(metric)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -354,7 +402,7 @@ def _sort_date(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
-def _best_key(record: ExperimentRecord, objective: Objective) -> tuple[float, datetime, str]:
+def _best_key(record: ExperimentIndexEntry, objective: Objective) -> tuple[float, datetime, str]:
     value = _numeric_metric(record, objective.metric)
     if value is None:
         raise ValueError(f'Metric "{objective.metric}" must be numeric.')
@@ -363,7 +411,7 @@ def _best_key(record: ExperimentRecord, objective: Objective) -> tuple[float, da
 
 
 def _pareto_key(
-    record: ExperimentRecord, objectives: list[Objective]
+    record: ExperimentIndexEntry, objectives: list[Objective]
 ) -> tuple[float | datetime | str, ...]:
     values: list[float | datetime | str] = []
     for objective in objectives:
@@ -377,7 +425,7 @@ def _pareto_key(
 
 
 def _dominates(
-    left: ExperimentRecord, right: ExperimentRecord, objectives: list[Objective]
+    left: ExperimentIndexEntry, right: ExperimentIndexEntry, objectives: list[Objective]
 ) -> bool:
     strictly_better = False
     for objective in objectives:

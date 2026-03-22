@@ -12,6 +12,13 @@ class GitWorktree:
 
 
 @dataclass(frozen=True)
+class GitCommit:
+    sha: str
+    date: str
+    parents: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class GitChangedPath:
     status: str
     path: str

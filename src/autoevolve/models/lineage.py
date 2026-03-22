@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from autoevolve.models.experiment import ExperimentRecord
+from autoevolve.models.experiment import ExperimentIndexEntry
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,6 @@ class LineageEdge:
 
 @dataclass(frozen=True)
 class LineageGraph:
-    root: ExperimentRecord
+    root: ExperimentIndexEntry
     node_order: tuple[str, ...]
     edges: tuple[LineageEdge, ...]
