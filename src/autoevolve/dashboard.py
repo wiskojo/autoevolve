@@ -51,6 +51,9 @@ _BRAILLE_BITS = {
     (1, 3): 0x80,
 }
 
+_POSITIVE_COLOR = "color(78)"
+_NEGATIVE_COLOR = "color(204)"
+
 
 @dataclass(frozen=True)
 class DashboardEntry:
@@ -361,7 +364,6 @@ class ExperimentDetailScreen(ModalScreen[None]):
 
     #detail-code-files > .datatable--cursor {
         background: #252a33;
-        color: #f3f4f6;
     }
     """
 
@@ -754,8 +756,6 @@ class ExperimentsPane(DataTable[object]):
                 Text(_table_age(entry), style="#d1d5db" if _is_recorded(entry) else "#8b95a7"),
                 update_width=True,
             )
-        if self._rows:
-            self.select_key(selected_key or self._rows[0].key)
 
     @property
     def selected_key(self) -> str | None:
@@ -894,8 +894,8 @@ class CodeFilesPane(DataTable[object]):
         for item in self._files:
             self.add_row(
                 Text(item.status, style="#8b95a7"),
-                Text(f"+{item.additions}", style="#7ee0a1"),
-                Text(f"-{item.deletions}", style="#ff7d90"),
+                Text(f"+{item.additions}", style=_POSITIVE_COLOR),
+                Text(f"-{item.deletions}", style=_NEGATIVE_COLOR),
                 Text(_truncate(item.display_path, path_width), style="#f3f4f6"),
                 key=item.path,
             )
@@ -1023,13 +1023,11 @@ class DashboardApp(App[None]):
 
     #experiments > .datatable--cursor {
         background: #252a33;
-        color: #f9fafb;
         text-style: bold;
     }
 
     #experiments > .datatable--fixed-cursor {
         background: #252a33;
-        color: #f9fafb;
     }
 
     #footer {
@@ -1833,9 +1831,9 @@ def _code_changes_view(
     )
     if additions or deletions:
         text.append(", ", style="#f3f4f6")
-        text.append(f"+{additions} insertions", style="#7ee0a1")
+        text.append(f"+{additions} insertions", style=_POSITIVE_COLOR)
         text.append(", ", style="#f3f4f6")
-        text.append(f"-{deletions} deletions", style="#ff7d90")
+        text.append(f"-{deletions} deletions", style=_NEGATIVE_COLOR)
     text.append("\n\n", style="#f3f4f6")
     text.append("FILES\n", style="bold #9aa4b2")
     text.append(str(len(files)), style="bold #f3f4f6")
@@ -1906,9 +1904,9 @@ def _styled_diff_text(patch: str) -> Text:
         if line.startswith("@@"):
             text.stylize("#b8c1cc", start, end)
         elif line.startswith("+") and not line.startswith("+++"):
-            text.stylize("#7ee0a1", start, end)
+            text.stylize(_POSITIVE_COLOR, start, end)
         elif line.startswith("-") and not line.startswith("---"):
-            text.stylize("#ff7d90", start, end)
+            text.stylize(_NEGATIVE_COLOR, start, end)
         else:
             text.stylize("#f3f4f6", start, end)
         text.append("\n")
@@ -2102,7 +2100,7 @@ def _format_delta(value: float | None) -> str:
 def _delta_color(value: float | None) -> str:
     if value is None or value == 0:
         return "#8b95a7"
-    return "#7ee0a1" if value > 0 else "#ff7d90"
+    return _POSITIVE_COLOR if value > 0 else _NEGATIVE_COLOR
 
 
 def _truncate(value: str, width: int) -> str:
