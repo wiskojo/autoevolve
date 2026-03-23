@@ -4,7 +4,7 @@
 
 `autoevolve` lets coding agents run git-backed experiment loops autonomously. It gives agents a lightweight workflow for branching, recording results, and comparing experiments without needing heavy external dependencies, databases, or services.
 
-Run it inside an existing project, let it set up the files your coding agent needs, and then watch your agent(s) iterate and branch through different experiments autonomously.
+Run it inside an existing project, let it set up the files your coding agent needs, and then let the agent iterate through experiments, branch into new research directions, and explore ideas on its own.
 
 ## Install
 
@@ -14,7 +14,7 @@ pip install autoevolve
 
 ## Quickstart
 
-Initialize `autoevolve` in an existing git repo:
+**1. Initialize `autoevolve` in an existing git repo**:
 
 ```bash
 autoevolve init
@@ -25,7 +25,7 @@ autoevolve init
 - `SKILL.md` or `PROGRAM.md`: the instructions your coding agent reads to use `autoevolve`
 - `PROBLEM.md`: the goal, metric, constraints, and validation setup for your problem
 
-Tell your agent to read `PROGRAM.md` or activate the skill depending on your setup:
+**2. Tell your agent to read `PROGRAM.md` or activate the skill depending on your setup**:
 
 ```
 Read PROGRAM.md, then start working.
@@ -40,7 +40,7 @@ From there, your agent should start working in the repo as usual. Experiment com
 - `EXPERIMENT.json`: the structured record of the experiment, including summary, metrics, and any references to other experiments
 - `JOURNAL.md`: the narrative record of the experiment, which could include the hypothesis, changes made, outcomes, reflections, etc.
 
-Start the TUI to monitor your agent's progress:
+**3. Start the TUI to monitor your agent's progress**:
 
 ```bash
 autoevolve dashboard
