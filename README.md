@@ -2,7 +2,7 @@
 
 ![screenshot](./assets/screenshot.png)
 
-`autoevolve` lets coding agents run git-backed experiment loops. It gives agents a lightweight workflow for branching, recording results, and comparing experiments without needing external databases or services.
+`autoevolve` lets coding agents run git-backed experiment loops autonomously. It gives agents a lightweight workflow for branching, recording results, and comparing experiments without needing heavy external dependencies, databases, or services.
 
 Run it inside an existing project, let it set up the files your coding agent needs, and then watch your agent(s) iterate and branch through different experiments autonomously.
 
