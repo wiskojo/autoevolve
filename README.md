@@ -1,10 +1,13 @@
 # autoevolve
 
-![screenshot](./assets/screenshot.png)
+![screenshot](https://raw.githubusercontent.com/wiskojo/autoevolve/main/assets/screenshot.png)
 
 `autoevolve` lets coding agents run git-backed experiment loops autonomously. It gives agents a lightweight workflow for branching, recording results, and comparing experiments without needing heavy external dependencies, databases, or services.
 
-Run it inside an existing project, let it set up the files your coding agent needs, and then let the agent iterate through experiments, branch into new research directions, and explore ideas on its own.
+Initialize it inside a project, let it set up the files your coding agents need, and then let the agents iterate through experiments, branch into new research directions, and explore ideas on their own.
+
+> [!NOTE]
+> `autoevolve` can create many experiment branches and worktrees. Try it in a repo where extra git history won’t be a problem, or use a new repo.
 
 ## Install
 
@@ -29,7 +32,7 @@ For an example problem to try, see the [circle packing example repo](https://git
 
 **2. Tell your agent to read `PROGRAM.md` or activate the skill depending on your setup**:
 
-```
+```text
 Read PROGRAM.md, then start working.
 
 # If using skills
@@ -37,7 +40,7 @@ $autoevolve  # Codex
 /autoevolve  # Claude Code
 ```
 
-From there, your agent should start working in the repo as usual. Experiment commits will include:
+From there, your agent should start working in the repo as usual. This works best if your agent is running with dangerously skip permissions/yolo mode. Experiment commits will include:
 
 - `EXPERIMENT.json`: the structured record of the experiment, including summary, metrics, and any references to other experiments
 - `JOURNAL.md`: the narrative record of the experiment, which could include the hypothesis, changes made, outcomes, reflections, etc.
@@ -52,7 +55,7 @@ autoevolve dashboard
 
 Here’s the CLI surface: `Human` commands handle setup and monitoring, `Lifecycle` manages experiments, and `Inspect` and `Analytics` help your agents review the experiment state.
 
-```
+```text
 Usage: autoevolve [OPTIONS] COMMAND [ARGS]...
 
   Git-backed experiment loops for coding agents.
