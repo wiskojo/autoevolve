@@ -78,11 +78,15 @@ def list_experiment_commits(repo: Repo, path: str, limit: int | None = None) -> 
         commits.append(
             GitCommit(
                 sha=sha,
-                date=date,
+                date=normalize_commit_date(date),
                 parents=tuple(parent for parent in parents.split() if parent),
             )
         )
     return commits
+
+
+def normalize_commit_date(value: str) -> str:
+    return value[:-1] + "+00:00" if value.endswith("Z") else value
 
 
 def read_text_blobs(repo: Repo, refs: Iterable[str], path: str) -> dict[str, str | None]:

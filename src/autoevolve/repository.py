@@ -9,6 +9,7 @@ from autoevolve.git import (
     find_repo_root,
     list_experiment_commits,
     list_linked_worktrees,
+    normalize_commit_date,
     open_repo,
     read_text_blob,
     read_text_blobs,
@@ -300,7 +301,7 @@ class ExperimentRepository:
         commit = self.repo.commit(sha)
         return ExperimentIndexEntry(
             sha=commit.hexsha,
-            date=commit.committed_datetime.isoformat(),
+            date=normalize_commit_date(commit.committed_datetime.isoformat()),
             parents=tuple(parent.hexsha for parent in commit.parents),
             document=parse_experiment_document(experiment_text),
         )
