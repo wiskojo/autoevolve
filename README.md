@@ -9,7 +9,7 @@ Run it inside an existing project, let it set up the files your coding agent nee
 ## Install
 
 ```bash
-pip install autoevolve
+pip install autoevolve-cli
 ```
 
 ## Quickstart

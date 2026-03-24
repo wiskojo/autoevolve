@@ -21,8 +21,7 @@ wheels = [
 ]
 
 [[package]]
-name = "autoevolve"
-version = "0.1.0"
+name = "autoevolve-cli"
 source = { editable = "." }
 dependencies = [
     { name = "gitpython" },

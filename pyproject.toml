@@ -1,6 +1,6 @@
 [project]
-name = "autoevolve"
-version = "0.1.0"
+name = "autoevolve-cli"
+dynamic = ["version"]
 description = "Git-backed experiment loops for coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,8 +23,13 @@ dev = [
 autoevolve = "autoevolve.app:main"
 
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling>=1.27", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = "^v(?P<version>.*)$"
+fallback-version = "0.1.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/autoevolve"]
