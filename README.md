@@ -25,6 +25,8 @@ autoevolve init
 - `SKILL.md` or `PROGRAM.md`: the instructions your coding agent reads to use `autoevolve`
 - `PROBLEM.md`: the goal, metric, constraints, and validation setup for your problem
 
+For an example problem to try, see the [circle packing example repo](https://github.com/wiskojo/autoevolve-circle-packing-example).
+
 **2. Tell your agent to read `PROGRAM.md` or activate the skill depending on your setup**:
 
 ```
